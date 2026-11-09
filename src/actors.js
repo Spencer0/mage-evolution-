@@ -273,19 +273,19 @@ export class Mage {
     }
     this.castK = damp(this.castK, s.casting ? 1 : 0, s.casting ? 30 : 9, dt);
     this.hurtK = damp(this.hurtK, s.hurt ? 1 : 0, s.hurt ? 40 : 8, dt);
-    const run = s.moving ? 1 : 0;
+    const run = s.moving ? (s.speed ?? 1) : 0;
     this.runK = damp(this.runK ?? 0, run, 8, dt);
-    this.phase += dt * (6 + 5 * this.runK);
+    this.phase += dt * (5 + 11 * this.runK);
     const ph = this.phase, rk = this.runK;
     const hover = T.float ? 0.32 + Math.sin(t * 2.2) * 0.08 : 0;
     body.position.y = hover + Math.abs(Math.sin(ph)) * 0.08 * rk + Math.sin(t * 2.1) * 0.015 * (1 - rk);
-    body.rotation.x = 0.14 * rk + this.castK * 0.1 - this.hurtK * 0.3;
+    body.rotation.x = 0.27 * rk + this.castK * 0.08 - this.hurtK * 0.3;
     body.rotation.z = Math.sin(ph) * 0.035 * rk;
     body.rotation.y = this.castK * 0.25;
     this.robe.rotation.y = Math.sin(ph) * 0.06 * rk;
-    this.head.rotation.x = -0.1 * rk + Math.sin(t * 1.3) * 0.03 - this.castK * 0.08;
+    this.head.rotation.x = -0.2 * rk + Math.sin(t * 1.3) * 0.03 - this.castK * 0.08;
     this.head.rotation.y = Math.sin(t * 0.7) * 0.08 * (1 - rk);
-    this.armL.rotation.x = Math.sin(ph) * 0.65 * rk - 0.1 - this.castK * 0.5;
+    this.armL.rotation.x = Math.sin(ph) * 0.95 * rk - 0.1 - this.castK * 0.5;
     this.armL.rotation.z = 0.16 + this.castK * 0.3;
     const armR = -0.75 + Math.sin(ph + Math.PI) * 0.12 * rk - this.castK * 0.95;
     this.armR.rotation.x = armR;
@@ -294,11 +294,11 @@ export class Mage {
     this.staff.rotation.z = 0.2;
     for (let i = 0; i < this.boots.length; i++) {
       const sgn = i ? 1 : -1;
-      this.boots[i].position.z = 0.1 + Math.sin(ph + (i ? Math.PI : 0)) * 0.22 * rk;
-      this.boots[i].position.y = Math.max(0, Math.sin(ph + (i ? Math.PI : 0) + 1.2)) * 0.12 * rk;
+      this.boots[i].position.z = 0.1 + Math.sin(ph + (i ? Math.PI : 0)) * 0.42 * rk;
+      this.boots[i].position.y = Math.max(0, Math.sin(ph + (i ? Math.PI : 0) + 1.2)) * 0.26 * rk;
       this.boots[i].rotation.y = sgn * 0.1;
     }
-    if (this.cape) this.cape.rotation.x = 0.12 + rk * 0.42 + Math.sin(ph * 0.5) * 0.08 * rk + Math.sin(t * 1.7) * 0.03;
+    if (this.cape) this.cape.rotation.x = 0.12 + rk * 0.8 + Math.sin(ph * 0.5) * 0.08 * rk + Math.sin(t * 1.7) * 0.03;
     const pulse = 1 + Math.sin(t * 5) * 0.08 + this.castK * 0.7;
     this.orb.scale.setScalar(pulse);
     this.orb.rotation.y = t * 1.5; this.orb.rotation.x = t;
@@ -321,12 +321,13 @@ export class Mage {
   }
 }
 const _white = new THREE.Color(1, 1, 1);
+const _bm = new THREE.Matrix4();
 
 // =================================================================== ORCS
 const ORC_LOOK = {
   grunt:    { s: 1.0,  skin: 0x5f9038, skin2: 0x3a6224, cloth: 0x4a3524, metal: 0x565660, weapon: 'club',     eyes: 0xffc020 },
   whelp:    { s: 0.62, skin: 0x8fb04a, skin2: 0x5e7e30, cloth: 0x5a4028, metal: 0x66605a, weapon: 'dagger',   eyes: 0xffe040, bigHead: true },
-  archer:   { s: 0.96, skin: 0x6f9258, skin2: 0x44603a, cloth: 0x2e3e26, metal: 0x565660, weapon: 'spear',    eyes: 0xffc020, hood: true, slim: true },
+  archer:   { s: 0.96, skin: 0x6f9258, skin2: 0x44603a, cloth: 0x2e3e26, metal: 0x565660, weapon: 'handaxe',  eyes: 0xffc020, hood: true, slim: true },
   brute:    { s: 1.62, skin: 0x4c7440, skin2: 0x2a4626, cloth: 0x33241a, metal: 0x3c3e48, weapon: 'maul',     eyes: 0xff5a20, helmet: true, heavy: true },
   shaman:   { s: 1.02, skin: 0x5a8272, skin2: 0x36564c, cloth: 0x4a2a62, metal: 0x8a7440, weapon: 'staff',    eyes: 0xc060ff, feathers: true, robe: true },
   loot:     { s: 0.92, skin: 0x97aa40, skin2: 0x667428, cloth: 0x6a5020, metal: 0xe0b030, weapon: 'none',     eyes: 0xffe040, sack: true },
@@ -414,9 +415,9 @@ function orcGeometry(type) {
       } else if (w === 'dagger') {
         a.add(box(0.05, 0.03, 0.5), 0xc8c8d0, M(0, hy2, 0.3));
         a.add(box(0.2, 0.05, 0.05), 0x3a2818, M(0, hy2, 0.08));
-      } else if (w === 'spear') {
-        a.add(cyl(0.035, 0.035, 2.4, 5), 0x5a4028, wm(0.5));
-        a.add(cone(0.08, 0.4, 4), 0xc8c8d0, wm(1.9));
+      } else if (w === 'handaxe') {
+        a.add(cyl(0.035, 0.04, 0.8, 5), 0x5a4028, wm(0.3));
+        a.add(box(0.05, 0.34, 0.3), 0x8e8e9c, M(0, hy2 + 0.14, 0.62), 0xd0d0dc);
       } else if (w === 'maul') {
         a.add(cyl(0.06, 0.07, 1.5, 6), 0x3a2818, wm(0.6));
         a.add(box(0.52, 0.52, 0.72), 0x4a4a52, M(0, hy2, 1.3), 0x7a7a84);
@@ -530,18 +531,19 @@ export class OrcVisual {
     const frozen = e.freezeT > 0;
     const K = this.look;
     if (!frozen) {
-      const rate = (e.moving ? 11 : 2.2) * (e.chillT > 0 ? 0.6 : 1) / Math.sqrt(K.s) * (e.type === 'whelp' ? 1.3 : 1);
+      const rate = (e.moving ? 15 : 2.2) * (e.chillT > 0 ? 0.6 : 1) / Math.sqrt(K.s);
       this.phase += dt * rate;
     }
     const ph = this.phase;
     const mv = e.moving ? 1 : 0;
     this.mvK = damp(this.mvK ?? 0, mv, 10, dt);
     const k = this.mvK;
-    this.hip.position.y = 0.84 + Math.abs(Math.sin(ph)) * 0.1 * k + Math.sin(ph * 0.5) * 0.015 * (1 - k);
+    const hop = this.type === 'whelp' ? 0.34 : this.type === 'loot' ? 0.2 : 0.12;
+    this.hip.position.y = 0.84 + Math.abs(Math.sin(ph)) * hop * k + Math.sin(ph * 0.5) * 0.015 * (1 - k);
     this.legL.rotation.x = Math.sin(ph) * 0.85 * k;
     this.legR.rotation.x = -Math.sin(ph) * 0.85 * k;
     this.hurtK = damp(this.hurtK, e.hitFlash > 0 ? 1 : 0, e.hitFlash > 0 ? 40 : 10, dt);
-    this.torso.rotation.x = 0.24 + 0.18 * k - this.hurtK * 0.35;
+    this.torso.rotation.x = 0.24 + (this.type === 'whelp' ? 0.42 : 0.26) * k - this.hurtK * 0.35;
     this.torso.rotation.y = Math.sin(ph) * 0.16 * k;
     this.torso.rotation.z = Math.sin(ph * 0.5) * 0.03 * (1 - k);
     this.armL.rotation.x = -Math.sin(ph) * 0.7 * k - 0.15;
@@ -549,8 +551,7 @@ export class OrcVisual {
     // weapon arm: carry, wind up, slam
     let ar = Math.sin(ph) * 0.5 * k - 0.5;
     if (e.attackAnim > 0) {
-      const dur = e.type === 'boss' && e.attackAnim > 0.45 ? 0.9 : 0.45;
-      const a = 1 - e.attackAnim / dur;          // 0 -> 1
+      const a = Math.max(0, 1 - e.attackAnim / (e.attackDur || 0.45));          // 0 -> 1
       ar = a < 0.45 ? -0.5 - (a / 0.45) * 2.3 : -2.8 + ((a - 0.45) / 0.55) * 3.3;
       this.torso.rotation.x += a < 0.45 ? -0.25 * (a / 0.45) : -0.25 + ((a - 0.45) / 0.55) * 0.7;
     } else if (e.type === 'loot') { ar = -2.6 + Math.sin(ph * 2) * 0.3; this.armL.rotation.x = -2.6 - Math.sin(ph * 2) * 0.3; }
@@ -572,6 +573,8 @@ export class OrcVisual {
     this.buff.visible = !!e.buffed;
     if (e.buffed) this.buff.rotation.z = t * 2;
   }
+
+  setShadow(on) { if (this.shadowOn === on) return; this.shadowOn = on; this.root.traverse(o => { if (o.isMesh && o.material === this.mat) o.castShadow = on; }); }
 
   /** Start the death tumble. dir: unit vector away from the blast. */
   kill(dirX, dirZ, power, tint) {
@@ -605,11 +608,32 @@ export class OrcPool {
     this.free = {};
     this.live = new Map();
     this.dying = [];
+    this.realShadows = true;
+    // one instanced blob under every orc: used instead of shadow maps on weaker devices
+    const g = new THREE.CircleGeometry(1, 12);
+    g.rotateX(-Math.PI / 2);
+    this.blobs = new THREE.InstancedMesh(g, new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.42, depthWrite: false }), 64);
+    this.blobs.frustumCulled = false; this.blobs.count = 0; this.blobs.renderOrder = 1;
+    scene.add(this.blobs);
+  }
+  updateBlobs() {
+    let i = 0;
+    if (!this.realShadows) {
+      for (const v of this.live.values()) {
+        if (i >= 64) break;
+        const r = v.look.s * 0.62;
+        _bm.makeScale(r, 1, r * 0.8).setPosition(v.root.position.x, 0.05, v.root.position.z);
+        this.blobs.setMatrixAt(i++, _bm);
+      }
+      this.blobs.instanceMatrix.needsUpdate = true;
+    }
+    this.blobs.count = i;
   }
   spawn(e) {
     const list = this.free[e.type] || (this.free[e.type] = []);
     const v = list.pop() || new OrcVisual(e.type);
     v.reset();
+    v.setShadow(this.realShadows || e.def.heavy);
     if (e.type === 'boss' || e.type === 'champion') v.spawnT = 1;
     v.root.position.set(e.x, 0, -e.d);
     v.yaw = 0;

@@ -17,37 +17,45 @@ export function mulberry32(a) {
 const LANE = 4.2;
 let NEXT_ID = 1;
 
+const MAX_ALIVE = 44;
+
+// The cave is one long stream of small groups a few metres apart, so the
+// mage is always running into something, with a goblin tide every so often.
 function generatePacks(rng, stats) {
   const packs = [];
-  let d = 12;
-  while (d < CAVE_LENGTH - 34) {
-    const nearChampion = CHAMPIONS.some(c => Math.abs(c.d - d) < 7);
+  let d = 11, n = 0;
+  while (d < CAVE_LENGTH - 40) {
+    const nearChampion = CHAMPIONS.some(c => Math.abs(c.d - d) < 9);
     if (!nearChampion) {
-      let budget = packBudget(d) * (d < 60 ? 1 : 0.85 + rng() * 0.3);
+      const horde = n > 5 && n % 13 === 12;
+      let budget = packBudget(d) * (horde ? 1.8 : d < 50 ? 1 : 0.7 + rng() * 0.6);
       const roll = rng();
-      const theme = roll < 0.16 ? 'swarm' : roll < 0.3 ? 'heavy' : roll < 0.42 ? 'ranged' : 'mixed';
+      const theme = horde || roll < 0.3 ? 'swarm' : roll < 0.45 ? 'heavy' : roll < 0.62 ? 'ranged' : 'mixed';
       const members = [];
-      let shamans = 0;
-      while (budget > 0.35 && members.length < 11) {
-        const opts = [['grunt', theme === 'mixed' ? 3 : 1.5]];
-        if (d > 55) opts.push(['whelp', theme === 'swarm' ? 9 : 2]);
-        if (d > 120) opts.push(['archer', theme === 'ranged' ? 5 : 1.1]);
-        if (d > 220 && budget >= 2.6) opts.push(['brute', theme === 'heavy' ? 5 : 0.9]);
-        if (d > 340 && budget >= 2.2 && shamans < 1) opts.push(['shaman', 0.8]);
+      let shamans = 0, brutes = 0;
+      const max = horde ? 14 : 9;
+      while (budget > 0.3 && members.length < max) {
+        const opts = [['whelp', theme === 'swarm' ? 9 : 3], ['grunt', d < 24 ? 0 : theme === 'mixed' ? 3 : theme === 'swarm' ? 0.6 : 1.5]];
+        if (d > 45) opts.push(['archer', theme === 'ranged' ? 5 : 0.9]);
+        if (d > 330 && budget >= 2.8 && brutes < 2) opts.push(['brute', theme === 'heavy' ? 4 : 0.5]);
+        if (d > 510 && budget >= 2.2 && shamans < 1) opts.push(['shaman', 0.7]);
         let total = 0;
         for (const o of opts) total += o[1];
-        let r = rng() * total, pick = 'grunt';
+        let r = rng() * total, pick = 'whelp';
         for (const o of opts) { r -= o[1]; if (r <= 0) { pick = o[0]; break; } }
+        if (ENEMIES[pick].cost > budget + 0.25) pick = 'whelp';
         if (pick === 'shaman') shamans++;
+        if (pick === 'brute') brutes++;
         members.push(pick);
         budget -= ENEMIES[pick].cost;
       }
-      if (d > 30 && rng() < stats.lootChance) members.push('loot');
-      packs.push({ d, members });
+      if (d > 40 && rng() < stats.lootChance) members.push('loot');
+      packs.push({ d, members, horde });
     }
-    d += 11.5 - 3 * (d / CAVE_LENGTH) + rng() * 3;
+    n++;
+    d += 5.4 + rng() * 3.2 - 1.2 * (d / CAVE_LENGTH);
   }
-  for (const c of CHAMPIONS) packs.push({ d: c.d, members: ['champion', 'grunt', 'grunt'], championName: c.name });
+  for (const c of CHAMPIONS) packs.push({ d: c.d, members: ['champion', 'grunt', 'grunt', 'whelp', 'whelp'], championName: c.name });
   packs.push({ d: CAVE_LENGTH, members: ['boss'] });
   packs.sort((a, b) => a.d - b.d);
   return packs;
@@ -67,7 +75,7 @@ export class RunSim {
     this.mage = {
       x: 0, d: 0, hp: stats.maxHp, maxHp: stats.maxHp,
       maxShield: stats.maxHp * stats.shield, shield: stats.maxHp * stats.shield, shieldDelay: 0,
-      alive: true, blocked: false, invuln: 0, revives: stats.phoenix, castT: 0, castSlot: 0,
+      alive: true, blocked: false, speedFrac: 1, invuln: 0, revives: stats.phoenix, castT: 0, castSlot: 0,
     };
     this.slots = opts.slots.map((s, i) => ({
       idx: i, rune: s.rune, def: RUNES[s.rune], power: s.power, haste: 1 + (s.haste || 0),
@@ -107,10 +115,10 @@ export class RunSim {
       hp: def.hp * hpM, maxHp: def.hp * hpM, dmg: def.dmg * dmgM, gold: def.gold * depthGold(depth),
       speed: def.speed * (0.92 + this.rng() * 0.16),
       atkT: def.atk * (0.3 + this.rng() * 0.5), windup: 0,
-      slot: (this.rng() * 2 - 1) * 1.25,
+      slot: (this.rng() * 2 - 1) * (def.heavy ? 0.7 : 2.3), weave: this.rng() * 6.28, engaged: false,
       burnT: 0, burnDps: 0, burnTick: 0, chillT: 0, shockT: 0, freezeT: 0, freezeImm: 0, stunT: 0,
       mark: false, alive: true, kx: 0, kd: 0, hitFlash: 0, buffed: false,
-      age: 0, taunt: 0, fleeing: false, moving: true, attackAnim: 0,
+      age: 0, taunt: 0, fleeing: false, moving: true, attackAnim: 0, attackDur: 0.45,
       summonT: 7, slamT: 5, enraged: false, name: def.name,
       ...extra,
     };
@@ -122,7 +130,9 @@ export class RunSim {
   spawnPacks() {
     while (this.packIdx < this.packs.length && this.mage.d + SPAWN_AHEAD >= this.packs[this.packIdx].d) {
       const p = this.packs[this.packIdx++];
+      if (p.horde) this.emit({ type: 'horde', d: p.d });
       p.members.forEach((type, i) => {
+        if (type !== 'boss' && type !== 'champion' && this.enemies.length >= MAX_ALIVE) return;
         if (type === 'boss') {
           this.boss = this.spawnEnemy('boss', 0, p.d + 1, {});
           this.emit({ type: 'bossIntro', e: this.boss });
@@ -131,7 +141,7 @@ export class RunSim {
           this.emit({ type: 'champion', e });
         } else {
           const x = (this.rng() * 2 - 1) * LANE;
-          this.spawnEnemy(type, x, p.d + i * 0.9 + this.rng() * 2.5, {});
+          this.spawnEnemy(type, x, p.d + i * 0.6 + this.rng() * 3, {});
         }
       });
     }
@@ -140,7 +150,7 @@ export class RunSim {
   // ------------------------------------------------------------ targeting
   inRange(e, range = CAST_RANGE) {
     const m = this.mage;
-    return e.alive && e.d - m.d < range && e.d - m.d > -3;
+    return e.alive && e.d - m.d < range && e.d - m.d > -9;
   }
   nearestEnemy(x, d, range, skip) {
     let best = null, bd = range * range;
@@ -192,14 +202,14 @@ export class RunSim {
       case 'ember':
         this.projectiles.push({
           id: NEXT_ID++, kind: 'fireball', x: ox, d: od, target, tx: target.x, td: target.d,
-          speed: 30, dmg, radius: def.radius, life: 2,
+          speed: 46, dmg, radius: def.radius, life: 2,
         });
         break;
       case 'frost': {
         const dx = target.x - ox, dd = target.d - od, l = Math.hypot(dx, dd) || 1;
         this.projectiles.push({
-          id: NEXT_ID++, kind: 'lance', x: ox, d: od, vx: (dx / l) * 38, vd: (dd / l) * 38,
-          dmg, pierce: def.pierce, hit: new Set(), life: 0.7,
+          id: NEXT_ID++, kind: 'lance', x: ox, d: od, vx: (dx / l) * 58, vd: (dd / l) * 58,
+          dmg, pierce: def.pierce, hit: new Set(), life: 0.52,
         });
         break;
       }
@@ -210,8 +220,8 @@ export class RunSim {
           used.add(t.id);
           const side = i - (def.missiles - 1) / 2;
           this.projectiles.push({
-            id: NEXT_ID++, kind: 'missile', x: ox, d: od, vx: side * 9, vd: 6 + this.rng() * 4,
-            target: t, dmg, speed: 24, life: 2.2, delay: i * 0.06,
+            id: NEXT_ID++, kind: 'missile', x: ox, d: od, vx: side * 11, vd: 12 + this.rng() * 4,
+            target: t, dmg, speed: 36, life: 2, delay: i * 0.04,
           });
         }
         break;
@@ -302,7 +312,7 @@ export class RunSim {
     const s = this.stats;
     this.kills++;
     this.combo++;
-    this.comboT = 3;
+    this.comboT = 2.5;
     if (this.combo > this.bestCombo) this.bestCombo = this.combo;
     const comboMult = 1 + Math.min(this.combo, s.comboCap) * 0.02;
     const gold = e.gold * s.goldMult * comboMult * (e.mark ? 1.6 : 1);
@@ -374,15 +384,20 @@ export class RunSim {
         if (was <= 0) this.emit({ type: 'shieldUp' });
       }
     }
-    let blocked = false;
+    // The mage never stops for fodder: every goblin hanging on just drags the
+    // sprint down a little. Only heavies (brutes, champions, the boss) are walls.
+    let drag = 0, wall = this.bossDead;
     for (const e of this.enemies) {
       if (!e.alive || e.fleeing) continue;
-      const fd = e.d - m.d;
-      if (fd > -0.6 && fd < e.r + 1.5 && Math.abs(e.x - m.x) < e.r + 1.3) { blocked = true; break; }
+      if (e.def.heavy) {
+        const fd = e.d - m.d;
+        if (fd > -0.6 && fd < e.r + 1.6 && Math.abs(e.x - m.x) < e.r + 1.5) wall = true;
+      } else if (e.engaged) drag++;
     }
-    if (this.bossDead) blocked = true;
-    m.blocked = blocked;
-    if (!blocked) m.d = Math.min(CAVE_LENGTH - 4, m.d + MAGE_SPEED * dt);
+    const want = wall ? 0 : Math.max(0.42, 1 - 0.1 * drag);
+    m.speedFrac += (want - m.speedFrac) * Math.min(1, dt * (want < m.speedFrac ? 12 : 5));
+    m.blocked = m.speedFrac < 0.12;
+    m.d = Math.min(CAVE_LENGTH - 4, m.d + MAGE_SPEED * m.speedFrac * dt);
 
     if (this.comboT > 0) {
       this.comboT -= dt;
@@ -407,10 +422,10 @@ export class RunSim {
         if (this.wispCd[i] <= 0) {
           const t = this.pickTarget();
           if (t) {
-            this.wispCd[i] = 1.15 / Math.sqrt(haste);
+            this.wispCd[i] = 0.6 / Math.sqrt(haste);
             this.projectiles.push({
               id: NEXT_ID++, kind: 'wisp', wisp: i, x: m.x, d: m.d, vx: (this.rng() - 0.5) * 8, vd: 5,
-              target: t, dmg: 3.8 * s.dmgMult, speed: 30, life: 2,
+              target: t, dmg: 2.6 * s.dmgMult, speed: 44, life: 2,
             });
             this.emit({ type: 'wispShot', wisp: i });
           } else this.wispCd[i] = 0;
@@ -421,7 +436,7 @@ export class RunSim {
         const t = this.clusterTarget(4.5);
         if (t) {
           this.meteorCd = 11 - 2 * s.meteor;
-          const x = t.x, d = t.d + (t.moving ? -1.5 : 0);
+          const x = t.x, d = Math.max(m.d + 3, t.d - (t.moving ? 4 : 0));
           this.emit({ type: 'meteor', x, d, delay: 0.75, r: 4.6 });
           this.pending.push({ t: 0.75, fn: () => this.explode(x, d, 4.6, 38 * s.dmgMult, 'fire', 'meteor', { knock: 5 }) });
         } else this.meteorCd = 0.2;
@@ -465,46 +480,66 @@ export class RunSim {
         }
       }
       const slow = e.chillT > 0 ? (e.def.elite ? 0.8 : 0.6) : 1;
-      const speed = e.speed * slow * (e.buffed ? 1.25 : 1) * (e.enraged ? 1.3 : 1);
+      const dx = m.x - e.x, dd = m.d - e.d, dist = Math.hypot(dx, dd);
+      let speed = e.speed * slow * (e.buffed ? 1.25 : 1) * (e.enraged ? 1.3 : 1);
+      // fodder that has caught the mage clings on at his pace (unless chilled)
+      if (!e.def.heavy && dist < 7) speed = Math.max(speed, (MAGE_SPEED * m.speedFrac + 3.5) * slow);
       const atkRate = slow * (e.enraged ? 1.35 : 1);
       const dmgMult = e.buffed ? 1.3 : 1;
-      const dx = m.x - e.x, dd = m.d - e.d, dist = Math.hypot(dx, dd);
       e.moving = false;
+      e.engaged = false;
+
+      // shaken off: too far behind to matter
+      if (!e.def.heavy && dd > 20) { e.alive = false; this.emit({ type: 'lost', e }); continue; }
 
       if (e.type === 'loot') {
         if (!e.fleeing) {
-          if (dist > 11) this.moveToward(e, m.x, m.d + 9, speed, dt);
-          else { e.taunt += dt; if (e.taunt > 1.3) { e.fleeing = true; this.emit({ type: 'lootFlee', e }); } }
+          if (dist > 14) this.moveToward(e, m.x, m.d + 12, speed, dt);
+          else { e.taunt += dt; e.d += MAGE_SPEED * m.speedFrac * 0.8 * dt; if (e.taunt > 0.9) { e.fleeing = true; this.emit({ type: 'lootFlee', e }); } }
         } else {
-          e.d += e.speed * 1.25 * slow * dt; e.moving = true;
-          if (e.d - m.d > 40) { e.alive = false; e.escaped = true; this.emit({ type: 'escape', e }); }
+          e.d += Math.max(e.speed * 1.2, MAGE_SPEED * 1.25) * slow * dt; e.moving = true;
+          if (e.d - m.d > 46) { e.alive = false; e.escaped = true; this.emit({ type: 'escape', e }); }
         }
         continue;
       }
 
-      const ranged = e.def.range && dist > e.def.reach + 1.2;
+      const ranged = e.def.range && dist > e.def.reach + 1.4;
       if (ranged) {
-        if (dist > e.def.range) this.moveToward(e, m.x + e.slot * 2.4, m.d + e.def.range - 1, speed, dt);
+        const want = e.def.range;
+        const strafe = Math.sin(this.t * 2.6 + e.weave) * 3.2;
+        if (dist > want + 1) this.moveToward(e, m.x + e.slot * 1.6 + strafe * 0.4, m.d + want - 1, speed, dt);
+        else if (dd < 0 && dist < want - 3) {
+          // backpedal ahead of the sprinting mage, hurling as it goes
+          e.d += MAGE_SPEED * m.speedFrac * 0.74 * slow * dt;
+          e.x += strafe * dt;
+          e.moving = true;
+        } else { e.x += strafe * 0.6 * dt; e.moving = Math.abs(strafe) > 1; }
         e.atkT -= dt * atkRate;
-        if (e.atkT <= 0 && dist < e.def.range + 3) {
-          e.atkT = e.def.atk;
-          e.attackAnim = 0.4;
+        if (e.atkT <= 0 && dist < want + 4) {
+          e.atkT = e.def.atk * (0.85 + this.rng() * 0.3);
+          e.attackAnim = e.attackDur = 0.35;
           this.projectiles.push({
-            id: NEXT_ID++, kind: e.type === 'shaman' ? 'hex' : 'spear', hostile: true,
-            x: e.x, d: e.d, speed: e.type === 'shaman' ? 13 : 19, dmg: e.dmg * dmgMult, life: 3,
+            id: NEXT_ID++, kind: e.type === 'shaman' ? 'hex' : 'axe', hostile: true,
+            x: e.x, d: e.d, speed: e.type === 'shaman' ? 17 : 23, dmg: e.dmg * dmgMult, life: 3,
           });
           this.emit({ type: 'enemyShoot', e });
         }
         continue;
       }
 
-      const reach = e.def.reach + 0.15;
+      const reach = e.def.reach + 0.2;
       if (dist > reach) {
-        const tx = m.x + Math.sin(e.slot) * e.def.reach * 0.85;
+        // zig-zag on the way in, then go for a spot around the mage
+        const far = Math.min(1, Math.max(0, (dist - 4) / 8));
+        const weave = e.def.heavy ? 0 : Math.sin(this.t * 4.2 + e.weave) * 2.4 * far;
+        const tx = m.x + Math.sin(e.slot) * e.def.reach * 0.85 + weave;
         const td = m.d + Math.cos(e.slot) * e.def.reach * 0.85;
         this.moveToward(e, tx, td, speed, dt);
         e.windup = 0;
       } else {
+        e.engaged = true;
+        // keep pace with the mage while hacking at him
+        if (!e.def.heavy) { e.d += MAGE_SPEED * m.speedFrac * slow * dt; e.moving = m.speedFrac > 0.2; }
         if (e.windup > 0) {
           e.windup -= dt * atkRate;
           if (e.windup <= 0) {
@@ -514,7 +549,7 @@ export class RunSim {
         } else {
           e.atkT -= dt * atkRate;
           if (e.atkT <= 0) {
-            e.atkT = e.def.atk; e.windup = 0.22; e.attackAnim = 0.45;
+            e.atkT = e.def.atk; e.windup = Math.min(0.2, e.def.atk * 0.35); e.attackAnim = e.attackDur = e.def.heavy ? 0.45 : 0.3;
             this.emit({ type: 'enemyAttack', e });
           }
         }
@@ -523,18 +558,18 @@ export class RunSim {
       if (e.type === 'boss') {
         if (!e.enraged && e.hp < e.maxHp * 0.5) { e.enraged = true; this.emit({ type: 'bossEnrage', e }); }
         e.summonT -= dt;
-        if (e.summonT <= 0 && dist < 26) {
+        if (e.summonT <= 0 && dist < 28) {
           e.summonT = e.enraged ? 6.5 : 9;
           this.emit({ type: 'bossSummon', e });
-          const n = e.enraged ? 6 : 4;
+          const n = e.enraged ? 9 : 6;
           for (let i = 0; i < n; i++) {
-            this.spawnEnemy(i % 3 === 2 ? 'grunt' : 'whelp', (this.rng() * 2 - 1) * LANE, e.d + 2 + this.rng() * 5, {});
+            this.spawnEnemy(i % 4 === 3 ? 'grunt' : 'whelp', (this.rng() * 2 - 1) * LANE, e.d + 2 + this.rng() * 5, {});
           }
         }
         e.slamT -= dt;
         if (e.slamT <= 0 && dist < 9) {
           e.slamT = e.enraged ? 4.5 : 6.5;
-          e.attackAnim = 0.9;
+          e.attackAnim = e.attackDur = 0.9;
           this.emit({ type: 'bossSlam', e, delay: 0.8 });
           const boss = e;
           this.pending.push({ t: 0.8, fn: () => { if (boss.alive) { this.hurtMage(boss.dmg * 1.6, boss); this.emit({ type: 'slamHit', e: boss }); } } });
@@ -561,7 +596,7 @@ export class RunSim {
         }
       }
       a.x = Math.max(-LANE - 1.2, Math.min(LANE + 1.2, a.x));
-      if (a.d < m.d + a.r * 0.6 + 0.5 && !a.fleeing) a.d = m.d + a.r * 0.6 + 0.5;
+      if (a.def.heavy && a.d < m.d + a.r * 0.6 + 0.5) a.d = m.d + a.r * 0.6 + 0.5;
       if (a.d > CAVE_LENGTH + 6) a.d = CAVE_LENGTH + 6;
     }
 
@@ -681,7 +716,7 @@ export class RunSim {
   summary(bestDepth) {
     const depth = Math.min(CAVE_LENGTH, this.victory ? CAVE_LENGTH : this.mage.d);
     const killGold = Math.floor(this.gold);
-    const depthBonus = Math.floor(depth * 0.12 * depthGold(depth * 0.5) * this.stats.goldMult);
+    const depthBonus = Math.floor(depth * 0.07 * depthGold(depth * 0.5) * this.stats.goldMult);
     const record = depth > bestDepth + 0.5 && !this.victory;
     const recordBonus = record ? Math.floor((killGold + depthBonus) * 0.2) : 0;
     const victoryBonus = this.victory ? Math.floor((killGold + depthBonus) * 0.5) : 0;

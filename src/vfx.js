@@ -150,7 +150,8 @@ export class Vfx {
     this.projGeo = {
       orb: new THREE.IcosahedronGeometry(1, 1),
       lance: new THREE.OctahedronGeometry(1, 0),
-      spear: new THREE.CylinderGeometry(0.035, 0.035, 2.2, 5).rotateX(Math.PI / 2),
+      shaft: new THREE.CylinderGeometry(0.035, 0.035, 0.8, 5),
+      blade: new THREE.BoxGeometry(0.06, 0.36, 0.34),
     };
     this.projFree = {};
     this.projLive = new Map();
@@ -190,7 +191,7 @@ export class Vfx {
 
   /** Build one of everything pooled so the first fight does not hitch on shader compiles. */
   prewarm() {
-    for (const kind of ['fireball', 'lance', 'missile', 'wisp', 'hex', 'spear']) this.freeProj(this.makeProj(kind));
+    for (const kind of ['fireball', 'lance', 'missile', 'wisp', 'hex', 'axe']) this.freeProj(this.makeProj(kind));
     const c = ELEMENT_COLOR.fire;
     for (let i = 0; i < 6; i++) { this.ring(0, -50, 0, c, 1, 0.01); this.flash(0, -50, 0, c, 1, 0.01); }
     this.addZone({ id: -1, x: 0, d: 0, r: 1, t: 0, dur: 0.01, dead: true });
@@ -260,7 +261,7 @@ export class Vfx {
     for (let i = 0; i < n; i++) {
       if (this.coins.length >= this.COINS) { this.onCoin && this.onCoin(each, false); continue; }
       const a = Math.random() * 6.283, sp = rand(1.5, 4.5);
-      this.coins.push({ x, y: rand(0.8, 1.6), z, vx: Math.cos(a) * sp, vy: rand(5, 9.5), vz: Math.sin(a) * sp, t: 0, home: rand(0.42, 0.75) + i * 0.012, rot: rand(0, 6), spin: rand(8, 16), value: each, sp: 6 });
+      this.coins.push({ x, y: rand(0.8, 1.6), z, vx: Math.cos(a) * sp, vy: rand(5, 9.5), vz: Math.sin(a) * sp, t: 0, home: rand(0.28, 0.5) + i * 0.01, rot: rand(0, 6), spin: rand(8, 16), value: each, sp: 14 });
     }
   }
 
@@ -358,7 +359,12 @@ export class Vfx {
     else if (kind === 'missile') { m = withGlow(mk(this.projGeo.orb, 0xc58bff, 3.2), 0xb06cff, 6.5); m.scale.setScalar(0.19); }
     else if (kind === 'wisp') { m = withGlow(mk(this.projGeo.orb, 0xdff4ff, 3.2), 0x9fd8ff, 6); m.scale.setScalar(0.12); }
     else if (kind === 'hex') { m = withGlow(mk(this.projGeo.orb, 0xb040ff, 2.6), 0x9a30e0, 7); m.scale.setScalar(0.24); }
-    else { m = new THREE.Mesh(this.projGeo.spear, new THREE.MeshStandardMaterial({ color: 0x8a6a48, emissive: 0x2a1a08 })); }
+    else {   // a thrown axe, tumbling end over end
+      m = new THREE.Mesh(this.projGeo.shaft, new THREE.MeshStandardMaterial({ color: 0x8a6a48, emissive: 0x3a2410 }));
+      const blade = new THREE.Mesh(this.projGeo.blade, new THREE.MeshStandardMaterial({ color: 0xd8d8e4, emissive: 0x6a6a78, metalness: 0.6, roughness: 0.35 }));
+      blade.position.set(0, 0.3, 0.14); m.add(blade);
+      m.scale.setScalar(1.25);
+    }
     this.scene.add(m);
     return { m, kind };
   }
@@ -386,10 +392,11 @@ export class Vfx {
       const blend = clamp(v.age * 9);
       m.position.x = lerp(m.position.x, tx, blend);
       m.position.z = lerp(m.position.z, tz, blend);
-      const targetY = p.hostile ? 1.5 : p.kind === 'fireball' ? 1.25 + Math.sin(clamp(v.age * 2.2) * Math.PI) * 0.5 : 1.2;
+      const targetY = p.hostile ? 1.5 + Math.sin(Math.min(1, v.age * 1.6) * Math.PI) * 1.1 : p.kind === 'fireball' ? 1.25 + Math.sin(clamp(v.age * 2.2) * Math.PI) * 0.5 : 1.2;
       m.position.y = damp(m.position.y, targetY, 7, dt);
       const dx = m.position.x - v.px, dy = m.position.y - v.py, dz = m.position.z - v.pz;
-      if (p.kind === 'lance' || p.kind === 'spear') {
+      if (p.kind === 'axe') { m.rotation.x -= dt * 22; m.rotation.y = Math.atan2(dx, dz); if (Math.random() < dt * 30) this.glow.emit(m.position.x, m.position.y, m.position.z, 0, 0, 0, 0.9, 0.9, 1.0, 0.22, 0.16, 0, 0, 0); }
+      else if (p.kind === 'lance') {
         if (dx * dx + dz * dz > 1e-6) { _v.set(m.position.x + dx, m.position.y + dy, m.position.z + dz); m.lookAt(_v); }
       } else { m.rotation.x += dt * 9; m.rotation.y += dt * 7; }
       // trails
@@ -529,6 +536,7 @@ export class Vfx {
       }
       case 'lootFlee': this.burst(ev.e.x, 2.4, -ev.e.d, _c.setRGB(1, 0.8, 0.2), 14, 5, 0.4, 0.6, { grav: 9, drag: 1 }); break;
       case 'escape': break;
+      case 'enemyShoot': if (ev.e.type === 'shaman') this.burst(ev.e.x, 2.6, -ev.e.d, _c.setRGB(0.7, 0.25, 1), 6, 3, 0.4, 0.3, { drag: 3 }); break;
     }
   }
 
@@ -571,7 +579,7 @@ export class Vfx {
         if (c.y < 0.14) { c.y = 0.14; c.vy = Math.abs(c.vy) * 0.45; c.vx *= 0.7; c.vz *= 0.7; }
       } else {
         const dx = mp.x - c.x, dy = mp.y + 1.4 - c.y, dz = mp.z - c.z, dist = Math.hypot(dx, dy, dz);
-        c.sp += 70 * dt;
+        c.sp += 90 * dt;
         const st = c.sp * dt;
         if (dist < st + 0.5) {
           this.onCoin && this.onCoin(c.value, true);
@@ -708,6 +716,8 @@ export class Vfx {
         w.position.set(mp.x + Math.sin(a) * 1.45, 2.7 + Math.sin(t * 3 + i * 2) * 0.3, mp.z + Math.cos(a) * 1.45);
         if (Math.random() < dt * 30) this.glow.emit(w.position.x, w.position.y, w.position.z, 0, 0, 0, 0.9, 1.4, 1.9, 0.3, 0.3, 0, 0, 0);
       }
+      // dust kicked up by the sprint
+      if (mg.speed > 0.5 && Math.random() < dt * 26 * mg.speed) this.smoke.emit(mp.x + rand(-0.3, 0.3), 0.12, mp.z + rand(0.2, 0.7), rand(-0.6, 0.6), rand(0.3, 1), rand(1, 2.5), 0.13, 0.11, 0.1, rand(0.35, 0.6), rand(0.3, 0.5), 0, 1.5, 1.8);
       // staff embers in the active element
       if (mg.element && Math.random() < dt * (10 + mg.tier * 5)) {
         const c = ELEMENT_COLOR[mg.element] || ELEMENT_COLOR.phys, p = this.staffTip;

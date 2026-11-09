@@ -111,7 +111,7 @@ const GradeShader = {
 
 const CAMS = {
   // offset from focus, look-at offset from focus, fov  (landscape / portrait)
-  run:   { l: { pos: [4.6, 5.6, 9.4], look: [0.4, 1.4, -7.5], fov: 52 }, p: { pos: [2.2, 6.8, 11.5], look: [0, 1.3, -9], fov: 64 } },
+  run:   { l: { pos: [4.4, 5.2, 9.0], look: [0.4, 1.4, -8.5], fov: 54 }, p: { pos: [2.2, 6.8, 11.5], look: [0, 1.3, -9], fov: 64 } },
   draw:  { l: { pos: [-3.2, 2.6, -8.2], look: [0, 1.9, 0], fov: 42 },     p: { pos: [-2.2, 2.8, -9.5], look: [0, 1.9, 0], fov: 50 } },
   shop:  { l: { pos: [-2.9, 2.5, -7.8], look: [0, 1.85, 0], fov: 40 },    p: { pos: [-2.4, 2.7, -9.2], look: [0, 1.85, 0], fov: 46 } },
   dead:  { l: { pos: [4.5, 3.2, 6.5], look: [0, 1.0, -1], fov: 46 },      p: { pos: [2.5, 4.5, 8.5], look: [0, 1.0, -1], fov: 56 } },
@@ -146,6 +146,7 @@ export class World {
     this.shakeAmt = 0;
     this.orbit = 0;
     this.zoom = 1;
+    this.speedK = 0;      // 0..1 how fast the subject is sprinting (widens the lens)
 
     // --- lights
     this.hemi = new THREE.HemisphereLight(0x7c8fc0, 0x3a2c20, 1.1);
@@ -289,8 +290,8 @@ export class World {
       const hgt = clamp(p[1] / 14);
       const k = (0.55 + t * 0.75) * (1.05 - hgt * 0.5) * (p[1] < 1.2 ? 0.72 : 1);
       const c = [lerp(L.rock2[0], L.rock[0], t) * k, lerp(L.rock2[1], L.rock[1], t) * k, lerp(L.rock2[2], L.rock[2], t) * k];
-      if (d < 175 && p[1] < 4 && vnoise(p[0] * 0.5, p[1] * 0.6, d * 0.5) > 0.55) { c[0] = c[0] * 0.6 + 0.012; c[1] = c[1] * 0.75 + 0.03; c[2] *= 0.55; } // moss
-      if (d > 505 && vnoise(p[0] * 0.9 + 3, p[1] * 0.9, d * 0.9) > 0.8) { c[0] += 0.5; c[1] += 0.07; }   // magma veins
+      if (d < 255 && p[1] < 4 && vnoise(p[0] * 0.5, p[1] * 0.6, d * 0.5) > 0.55) { c[0] = c[0] * 0.6 + 0.012; c[1] = c[1] * 0.75 + 0.03; c[2] *= 0.55; } // moss
+      if (d > 765 && d < 1095 && vnoise(p[0] * 0.9 + 3, p[1] * 0.9, d * 0.9) > 0.8) { c[0] += 0.5; c[1] += 0.07; }   // magma veins
       return c;
     };
     const floorCol = (x, d) => {
@@ -622,10 +623,10 @@ export class World {
     const tl = _v2.set(cfg.look[0], cfg.look[1], cfg.look[2]).add(focus);
     if (this.camSnap) { this.camPos.copy(tp); this.camLook.copy(tl); this.camera.fov = cfg.fov; this.camSnap = false; this.viewShiftCur.x = this.viewShift.x; this.viewShiftCur.y = this.viewShift.y; }
     else {
-      const k = this.camMode === 'run' || this.camMode === 'boss' ? 4.5 : 2.6;
+      const k = this.camMode === 'run' || this.camMode === 'boss' ? 6 : 2.6;
       this.camPos.x = damp(this.camPos.x, tp.x, k, dt); this.camPos.y = damp(this.camPos.y, tp.y, k, dt); this.camPos.z = damp(this.camPos.z, tp.z, k * 1.6, dt);
       this.camLook.x = damp(this.camLook.x, tl.x, k, dt); this.camLook.y = damp(this.camLook.y, tl.y, k, dt); this.camLook.z = damp(this.camLook.z, tl.z, k * 1.6, dt);
-      this.camera.fov = damp(this.camera.fov, cfg.fov, 3, dt);
+      this.camera.fov = damp(this.camera.fov, cfg.fov + this.speedK * 7, 3, dt);
     }
     // keep the camera inside the rock
     const cd = -this.camPos.z, lim = caveW(cd) * 0.6;

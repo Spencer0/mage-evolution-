@@ -329,6 +329,9 @@ class Game {
         break;
       }
       case 'escape': this.orcs.remove(ev.e); ui.toast('The loot hauler got away.'); break;
+      case 'lost': this.orcs.remove(ev.e); break;
+      case 'horde': ui.toast('Goblin tide!'); sfx.horde(); break;
+      case 'enemyShoot': sfx.throwAxe(); break;
       case 'mageHit': {
         this.hurtT = 0.16;
         const k = Math.min(1, (ev.amount + ev.absorbed) / sim.mage.maxHp * 5 + 0.2);
@@ -400,6 +403,9 @@ class Game {
     const raw = Math.min(0.25, (now - this.last) / 1000);
     this.last = now;
     const rdt = Math.min(raw, 1 / 20);
+    // the host frame can change size without a window resize event (phones, embeds)
+    const cv = this.world.canvas;
+    if (cv.clientWidth && cv.clientHeight && (cv.clientWidth !== this.world.w || cv.clientHeight !== this.world.h)) this.onResize();
     if (this.state === 'run') this.world.watchPerformance(raw * 1000);
 
     for (let i = this.timers.length - 1; i >= 0; i--) {
@@ -427,7 +433,10 @@ class Game {
       this.syncActors(dt);
       const m = sim.mage;
       depth = m.d;
-      mage.update(dt, { moving: m.alive && !m.blocked && !sim.over, casting: m.castT > 0.1, hurt: this.hurtT > 0, dead: !m.alive });
+      const sprint = m.alive && !sim.over ? m.speedFrac : 0;
+      mage.update(dt, { moving: sprint > 0.15, speed: sprint, casting: m.castT > 0.1, hurt: this.hurtT > 0, dead: !m.alive });
+      world.speedK = damp(world.speedK, sprint, 4, rdt);
+      this.sprint = sprint;
       if (this.state === 'run') {
         const elite = this.pickElite();
         this.ui.updateRun(sim, elite);
@@ -439,12 +448,13 @@ class Game {
           this.ui.banner(b.name, firstZone ? 'Slay everything' : `${Math.floor(m.d)} m deep`, '#' + b.accent.toString(16).padStart(6, '0'));
           if (!firstZone) this.sfx.zone();
         }
-        this.sfx.setBeat(true, Math.min(1, sim.enemies.length / 14));
+        this.sfx.setBeat(true, Math.min(1, sim.enemies.length / 18));
         if (m.hp < m.maxHp * 0.3 && m.alive) { world.grade.uniforms.uFlash.value.set(0xff1808); world.flashAmt = Math.max(world.flashAmt, 0.3 + Math.sin(this.t * 7) * 0.1); }
       }
       this.fill.intensity = 0;
     } else {
       mage.update(rdt, { moving: false, casting: false, hurt: false, dead: false });
+      world.speedK = 0; this.sprint = 0;
       // a soft fill so the mage reads against the moonlit entrance
       this.fill.position.copy(world.camera.position).add(_v.set(0, 1.5, 0));
       this.fill.intensity = damp(this.fill.intensity, 42, 4, rdt);
@@ -452,6 +462,8 @@ class Game {
     if (this.state === 'results') this.ui.updateResults(rdt);
 
     this.orcs.updateDying(dt);
+    this.orcs.realShadows = world.quality === 2;
+    this.orcs.updateBlobs();
     this.focus.copy(mage.root.position);
     world.update(rdt, this.focus, depth);
     mage.getStaffTip(this.vfx.staffTip);
@@ -465,6 +477,7 @@ class Game {
         wisps: !sim || live ? this.stats.wisps : 0,
         element: !sim || live ? this.element : null,
         tier: mage.tier,
+        speed: this.sprint || 0,
       },
     });
     world.grade.uniforms.uDesat.value = damp(world.grade.uniforms.uDesat.value, sim && !sim.mage.alive ? 0.75 : 0, 3, rdt);

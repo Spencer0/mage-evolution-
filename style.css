@@ -66,10 +66,12 @@ b { font-weight: 800; }
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 .btn-big { font-size: 18px; padding: 16px 28px; }
-.btn-small { font-size: 12px; padding: 9px 12px; }
+.btn-small { font-size: 12px; padding: 9px 12px; white-space: nowrap; }
 .btn-ghost { background: rgba(12, 16, 32, 0.6); border-color: var(--edge); color: var(--muted); }
-.btn-icon { width: 40px; height: 40px; padding: 0; font: 700 18px/1 var(--body); }
-.btn-icon.off { text-decoration: line-through; opacity: 0.55; }
+.btn-icon { width: 40px; height: 40px; padding: 0; display: grid; place-items: center; }
+.chev { display: inline-block; width: 0; height: 0; border: 0.38em solid transparent; border-left: 0.62em solid currentColor; border-right: 0; margin-left: 0.5em; vertical-align: -0.04em; }
+.chev.left { border-left: 0; border-right: 0.62em solid currentColor; margin: 0 0.5em 0 0; }
+.btn-icon.off { opacity: 0.4; }
 .btn-danger { border-color: var(--blood); color: #ffb4ae; }
 
 /* ---------------------------------------------------------------- icons */
@@ -97,7 +99,8 @@ b { font-weight: 800; }
 /* ---------------------------------------------------------------- rune drawing */
 #draw { flex-direction: column; justify-content: space-between; padding-top: calc(12px + var(--safe-t)); padding-bottom: calc(12px + var(--safe-b)); background: radial-gradient(ellipse at 50% 46%, rgba(7, 10, 20, 0) 0%, rgba(7, 10, 20, 0.55) 62%, rgba(7, 10, 20, 0.9) 100%); }
 .draw-head { display: flex; align-items: flex-start; gap: 12px; }
-.draw-head > .btn, .draw-spacer { flex: 0 0 84px; }
+.draw-head > .btn { flex: 0 0 auto; }
+.draw-spacer { flex: 0 0 84px; }
 .draw-title { flex: 1; min-width: 0; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .draw-title h2 { font: 800 clamp(22px, 4.6vw, 34px)/1.05 var(--display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--gold-hi); text-shadow: 0 2px 0 #000, 0 0 24px rgba(244, 196, 82, 0.4); text-wrap: balance; }
 .draw-title p { color: var(--parchment); font-size: 15px; text-shadow: 0 1px 6px #000; text-wrap: balance; }
@@ -242,7 +245,7 @@ b { font-weight: 800; }
 #evo-fill { height: 100%; width: 0; background: linear-gradient(90deg, var(--gold-deep), var(--gold-hi)); transition: width 0.35s; }
 .evo-next { font-size: 14px; color: var(--parchment); }
 #btn-go { align-self: flex-start; }
-#btn-go span { margin-left: 6px; }
+
 .shop-panel { flex: 0 0 min(60%, 780px); min-width: 0; display: flex; flex-direction: column; background: linear-gradient(90deg, rgba(7, 10, 20, 0) 0, rgba(7, 10, 20, 0.86) 28px, rgba(7, 10, 20, 0.92) 100%); pointer-events: auto; }
 .shop-scroll { flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: calc(14px + var(--safe-t)) var(--gutter-r) calc(20px + var(--safe-b)) 36px; scrollbar-width: thin; scrollbar-color: var(--edge) transparent; }
 .shop-cat { margin: 14px 0 8px; display: flex; align-items: center; gap: 10px; font: 800 14px/1 var(--display); letter-spacing: 0.24em; text-transform: uppercase; color: var(--gold); }
@@ -312,7 +315,7 @@ b { font-weight: 800; }
   .vitals { max-width: none; }
   .slots { justify-content: center; }
   .toasts { bottom: 150px; }
-  .draw-head > .btn, .draw-spacer { flex-basis: 70px; }
+  .draw-spacer { flex-basis: 76px; }
   .grimoire-label span { display: block; margin: 5px 0 0; }
 }
 @media (max-width: 520px) {

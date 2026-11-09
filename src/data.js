@@ -1,18 +1,18 @@
 // Game data: runes, enemies, upgrades, evolutions and every balance knob.
 // Pure data + pure functions, shared by the simulation, the UI and tools/balance.mjs.
 
-export const CAVE_LENGTH = 800;      // metres to the Warlord's throne
-export const MAGE_SPEED = 4.8;       // metres per second while not blocked
-export const SPAWN_AHEAD = 34;       // packs wake up when the mage gets this close
-export const CAST_RANGE = 19;
+export const CAVE_LENGTH = 1200;     // metres to the Warlord's throne
+export const MAGE_SPEED = 7.7;       // sprint speed, metres per second
+export const SPAWN_AHEAD = 44;       // groups charge once the mage gets this close
+export const CAST_RANGE = 25;
 
 // ---------------------------------------------------------------- biomes
 export const BIOMES = [
   { id: 'entrance', name: 'The Maw',           from: 0,   fog: 0x0b1020, ambient: 0x4a5a86, accent: 0xff9a3c },
-  { id: 'crystal',  name: 'Crystal Hollows',   from: 160, fog: 0x070d24, ambient: 0x3c5cae, accent: 0x4fd8ff },
-  { id: 'fungal',   name: 'Glowcap Deeps',     from: 330, fog: 0x06140f, ambient: 0x2f7a5a, accent: 0x6dffa8 },
-  { id: 'magma',    name: 'The Ember Forge',   from: 520, fog: 0x1a0704, ambient: 0x8a3a22, accent: 0xff5a1f },
-  { id: 'throne',   name: "Warlord's Throne",  from: 720, fog: 0x12040f, ambient: 0x7a2a4a, accent: 0xff2a55 },
+  { id: 'crystal',  name: 'Crystal Hollows',   from: 240, fog: 0x070d24, ambient: 0x3c5cae, accent: 0x4fd8ff },
+  { id: 'fungal',   name: 'Glowcap Deeps',     from: 500, fog: 0x06140f, ambient: 0x2f7a5a, accent: 0x6dffa8 },
+  { id: 'magma',    name: 'The Ember Forge',   from: 780, fog: 0x1a0704, ambient: 0x8a3a22, accent: 0xff5a1f },
+  { id: 'throne',   name: "Warlord's Throne",  from: 1080, fog: 0x12040f, ambient: 0x7a2a4a, accent: 0xff2a55 },
 ];
 
 export function biomeAt(d) {
@@ -41,15 +41,15 @@ export const RUNES = {
     glyph: [[0, -0.95], [0.95, 0.8], [-0.95, 0.8], [0, -0.95]], closed: true, complexity: 1,
     blurb: 'Explodes on impact and sets orcs ablaze.',
     tip: 'Splash damage. Burning orcs take damage over time.',
-    cd: 1.05, dmg: 9, radius: 2.7,
+    cd: 0.5, dmg: 6, radius: 2.6,
   },
   storm: {
     id: 'storm', name: 'Storm', element: 'storm', spell: 'Chain Lightning',
     color: '#8fd0ff', hex: 0x7fc4ff, hex2: 0xe8f6ff,
     glyph: [[0.45, -1], [-0.55, 0.08], [0.55, -0.08], [-0.45, 1]], closed: false, complexity: 1,
     blurb: 'Instant bolts that leap from orc to orc.',
-    tip: 'Fast casts, chains to 3 extra orcs. Shocked orcs take +20% damage.',
-    cd: 0.52, dmg: 3.6, chains: 3, chainRange: 7,
+    tip: 'Rapid casts, chains to 3 extra orcs. Shocked orcs take +20% damage.',
+    cd: 0.27, dmg: 2.3, chains: 3, chainRange: 7,
   },
   frost: {
     id: 'frost', name: 'Frost', element: 'frost', spell: 'Ice Lance',
@@ -57,7 +57,7 @@ export const RUNES = {
     glyph: [[-0.8, -0.95], [0.8, -0.95], [-0.8, 0.95], [0.8, 0.95], [-0.8, -0.95]], closed: true, complexity: 1.4,
     blurb: 'Piercing lances that chill everything in line.',
     tip: 'Pierces 4 orcs. Chilled orcs move and attack 40% slower.',
-    cd: 0.85, dmg: 6.6, pierce: 4,
+    cd: 0.42, dmg: 4.2, pierce: 4,
   },
   arcane: {
     id: 'arcane', name: 'Arcane', element: 'arcane', spell: 'Seeker Missiles',
@@ -65,7 +65,7 @@ export const RUNES = {
     glyph: circle, closed: true, complexity: 1,
     blurb: 'Homing missiles that turn orcs into gold.',
     tip: 'Marked orcs drop +60% gold, whoever lands the kill.',
-    cd: 0.95, dmg: 3.2, missiles: 3,
+    cd: 0.5, dmg: 2.1, missiles: 3,
   },
   void: {
     id: 'void', name: 'Void', element: 'void', spell: 'Singularity',
@@ -73,7 +73,7 @@ export const RUNES = {
     glyph: star, closed: true, complexity: 1.9,
     blurb: 'Tears a hole in the world that devours packs.',
     tip: 'Pulls orcs together and crushes them. Hardest rune to draw.',
-    cd: 2.5, dmg: 6.3, radius: 5.5, duration: 1.8,
+    cd: 1.5, dmg: 4.2, radius: 5.5, duration: 1.2,
   },
 };
 export const RUNE_ORDER = ['ember', 'storm', 'frost', 'arcane', 'void'];
@@ -103,28 +103,30 @@ export function runeTempo(seconds, complexity = 1) {
 }
 
 // ---------------------------------------------------------------- enemies
+// "heavy" enemies are walls: the mage has to stop and kill them. Everything
+// else is fodder that swarms, slows the sprint and gets blown apart.
 export const ENEMIES = {
-  grunt:    { name: 'Orc Grunt',     hp: 24,  dmg: 9,   atk: 1.0,  speed: 4.8, reach: 1.6, r: 0.6,  gold: 4,   cost: 1 },
-  whelp:    { name: 'Orc Whelp',     hp: 8,   dmg: 4.2, atk: 0.62, speed: 7.6, reach: 1.3, r: 0.42, gold: 1.4, cost: 0.42 },
-  archer:   { name: 'Spear Thrower', hp: 15,  dmg: 7.5, atk: 2.2,  speed: 4.4, reach: 1.5, r: 0.55, gold: 4,   cost: 1.4, range: 12 },
-  brute:    { name: 'Orc Brute',     hp: 95,  dmg: 24,  atk: 1.7,  speed: 3.3, reach: 2.2, r: 1.0,  gold: 15,  cost: 3.2, heavy: true },
-  shaman:   { name: 'Orc Shaman',    hp: 42,  dmg: 11,   atk: 2.8,  speed: 3.8, reach: 1.5, r: 0.6,  gold: 13,  cost: 2.6, range: 10, aura: 7 },
-  loot:     { name: 'Loot Hauler',   hp: 55,  dmg: 0,   atk: 9,    speed: 5.2, reach: 1.5, r: 0.65, gold: 45,  cost: 0 },
-  champion: { name: 'Champion',      hp: 160, dmg: 22,  atk: 1.4,  speed: 3.7, reach: 2.5, r: 1.25, gold: 160, cost: 0, heavy: true, elite: true },
-  boss:     { name: 'Gor’mak the Warlord', hp: 280, dmg: 16, atk: 1.6, speed: 2.9, reach: 3.2, r: 1.9, gold: 2500, cost: 0, heavy: true, elite: true },
+  whelp:    { name: 'Goblin',        hp: 5,   dmg: 2.2, atk: 0.5,  speed: 11.5, reach: 1.3, r: 0.42, gold: 0.75, cost: 0.4 },
+  grunt:    { name: 'Orc Grunt',     hp: 15,  dmg: 5,   atk: 0.8,  speed: 9,    reach: 1.6, r: 0.6,  gold: 2.4, cost: 1 },
+  archer:   { name: 'Axe Thrower',   hp: 9,   dmg: 3.2, atk: 1.25, speed: 8.5,  reach: 1.5, r: 0.55, gold: 2.4, cost: 1, range: 14 },
+  brute:    { name: 'Orc Brute',     hp: 120, dmg: 15,  atk: 1.25, speed: 5.5,  reach: 2.2, r: 1.0,  gold: 16,  cost: 3.4, heavy: true },
+  shaman:   { name: 'Orc Shaman',    hp: 34,  dmg: 7,   atk: 2.0,  speed: 7,    reach: 1.5, r: 0.6,  gold: 12,  cost: 2.6, range: 12, aura: 8 },
+  loot:     { name: 'Loot Hauler',   hp: 50,  dmg: 0,   atk: 9,    speed: 9,    reach: 1.5, r: 0.65, gold: 45,  cost: 0 },
+  champion: { name: 'Champion',      hp: 260, dmg: 16,  atk: 1.1,  speed: 5.5,  reach: 2.5, r: 1.25, gold: 160, cost: 0, heavy: true, elite: true },
+  boss:     { name: 'Gor\u2019mak the Warlord', hp: 520, dmg: 13, atk: 1.3, speed: 4.5, reach: 3.2, r: 1.9, gold: 2500, cost: 0, heavy: true, elite: true },
 };
 export const CHAMPIONS = [
-  { d: 200, name: 'Krug Bonechewer' },
-  { d: 400, name: 'Mogra the Flayer' },
+  { d: 300, name: 'Krug Bonechewer' },
+  { d: 900, name: 'Mogra the Flayer' },
   { d: 600, name: 'Ashfang Ironjaw' },
 ];
 
 // How much tougher / richer the cave gets with depth.
-export const SCALE = { hp: 110, dmg: 166, gold: 330, budget: 80, cost: 1.25 };
+export const SCALE = { hp: 165, dmg: 250, gold: 600, budget: 150, cost: 1.25 };
 export function depthHp(d)   { return Math.exp(d / SCALE.hp); }
 export function depthDmg(d)  { return Math.exp(d / SCALE.dmg); }
 export function depthGold(d) { return Math.exp(d / SCALE.gold); }
-export function packBudget(d) { return d < 14 ? 1 : 1.9 + d / SCALE.budget; }
+export function packBudget(d) { return 1.1 + d / SCALE.budget; }
 
 // ---------------------------------------------------------------- upgrades
 // Levelled stats: cost(level) = base * growth^(level * SCALE.cost), rounded to something tidy.
@@ -174,7 +176,7 @@ export const UPGRADES = [
     value: l => `Combo cap ${25 + 10 * l}` },
   { id: 'bounty', cat: 'fortune', icon: 'bounty', name: 'Orc Payroll', max: 5, costs: [150, 700, 3000, 12000, 45000],
     desc: 'Gold-hauling orcs wander the cave far more often.',
-    value: l => `${pct(0.05 + 0.045 * l)} per pack` },
+    value: l => `${(2 + 1.8 * l).toFixed(1)}% of groups` },
 
   // --- Arcana (perks)
   { id: 'rune_storm', cat: 'arcana', icon: 'rune', rune: 'storm', name: 'Rune of Storm', max: 1, costs: [30],
@@ -264,7 +266,7 @@ export function computeStats(save) {
     frenzy: L('frenzy'),
     comboCap: 25 + 10 * L('frenzy'),
     corpse: 0.1 * L('corpse'),
-    lootChance: 0.05 + 0.045 * L('bounty'),
+    lootChance: 0.02 + 0.018 * L('bounty'),
     runes,
   };
 }

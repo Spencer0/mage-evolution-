@@ -110,7 +110,7 @@ export class Sfx {
       if (s === 4) this.noise({ f0: 1800, dur: 0.07, gain: 0.03 + k * 0.03, type: 'highpass' });
       if (k > 0.5 && (s === 2 || s === 5 || s === 7)) this.noise({ f0: 5000, dur: 0.03, gain: 0.02, type: 'highpass' });
       if (s === 0 && Math.random() < 0.5) { const n = 45 + PENTA[(Math.random() * 5) | 0]; this.tone({ type: 'triangle', f0: NOTE(n), dur: 0.5, gain: 0.035, echo: 0.6 }); }
-    }, 172);
+    }, 136);
   }
 
   // ------------------------------------------------------------ spells
@@ -152,6 +152,8 @@ export class Sfx {
     this.tone({ type: 'square', f0: NOTE(n), dur: 0.05, gain: 0.03 });
     this.tone({ type: 'square', f0: NOTE(n + 7), dur: 0.14, gain: 0.035, when: 0.045, echo: 0.25 });
   }
+  throwAxe() { if (this.ok('throw', 0.08)) this.noise({ f0: 900, f1: 2600, dur: 0.13, gain: 0.045, type: 'bandpass', q: 3 }); }
+  horde() { if (this.ok('horde', 1)) { for (let i = 0; i < 5; i++) this.tone({ type: 'sawtooth', f0: 520 + Math.random() * 300, f1: 300 + Math.random() * 150, dur: 0.28, gain: 0.04, when: i * 0.06, echo: 0.5 }); } }
   enemySwing() { if (this.ok('swing', 0.09)) this.noise({ f0: 500, f1: 1600, dur: 0.11, gain: 0.05, type: 'bandpass' }); }
   mageHurt(shielded) {
     if (!this.ok('hurt', 0.07)) return;

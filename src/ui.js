@@ -81,6 +81,7 @@ export class UI {
       : count > 1 && index > 0 ? 'Mix elements to set off reactions.'
       : 'Clean lines hit harder. Quick strokes cast faster.';
     $('btn-to-shop').style.visibility = canShop ? 'visible' : 'hidden';
+    if (index === 0) { const rr = $('rune-result'); rr.className = 'rune-result'; rr.textContent = ''; }   // no stale banner from last run
     const pips = $('draw-pips');
     pips.textContent = '';
     if (count > 1) {
