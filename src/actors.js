@@ -561,13 +561,14 @@ export class OrcVisual {
     // status dressing
     const m = this.mat;
     let r = 1, g = 1, b = 1;
-    if (e.chillT > 0 || frozen) { r = 0.6; g = 0.88; b = 1.3; }
-    if (e.burnT > 0) { r *= 1.5; g *= 0.8; b *= 0.6; }
+    if (frozen && e.frozenAs === 'petrify') { r = 0.75; g = 0.7; b = 0.62; }
+    else if ((e.chillT > 0 && !e.daze) || frozen) { r = 0.6; g = 0.88; b = 1.3; }
+    if (e.burnT > 0) { r *= e.bleed ? 1.35 : 1.5; g *= e.bleed ? 0.7 : 0.8; b *= 0.6; }
     if (e.enraged) { r *= 1.5; g *= 0.7; b *= 0.7; }
     m.color.setRGB(r, g, b);
     const fl = e.hitFlash > 0 ? e.hitFlash / 0.12 : 0;
     m.emissive.setRGB(fl * 0.4 + (e.burnT > 0 ? 0.1 : 0), fl * 0.4, fl * 0.4 + (e.shockT > 0 ? 0.08 + Math.sin(t * 40) * 0.06 : 0));
-    this.ice.visible = frozen;
+    this.ice.visible = frozen && e.frozenAs !== 'petrify';
     this.mark.visible = !!e.mark;
     if (e.mark) { this.mark.rotation.y = t * 3; this.mark.position.y = 2.75 + Math.sin(t * 4) * 0.08; }
     this.buff.visible = !!e.buffed;
@@ -672,4 +673,239 @@ export class OrcPool {
   }
   /** Compile shaders / upload geometry up front so the first pack does not hitch. */
   prewarm(types) { for (const t of types) { const v = new OrcVisual(t); this.scene.add(v.root); this.dying.push(v); v.dying = 9; v.vel = { x: 0, y: 0, z: 0, spin: 0 }; v.tint = { r: 0, g: 0, b: 0 }; v.root.position.y = -60; } }
+}
+
+// =================================================================== WARRIOR
+const WARRIOR_TIERS = [
+  // Recruit
+  { armor: 0x6a4e34, armor2: 0x8a6a48, cloth: 0x7a3a2a, trim: 0x8a7458, metal: 0x7a7a80, blade: 0x9a9aa4, helm: 0, shield: 0, sword: 1.05, scale: 0.96 },
+  // Footman
+  { armor: 0x55606e, armor2: 0x8894a4, cloth: 0x2f4fa8, trim: 0xa8b0c0, metal: 0x8894a4, blade: 0xb8c0cc, helm: 1, shield: 1, sword: 1.2, scale: 1.0 },
+  // Veteran
+  { armor: 0x4a5462, armor2: 0x9aa6b8, cloth: 0x8a1c1c, trim: 0xe0b040, metal: 0xa8b4c4, blade: 0xc8d0dc, helm: 2, shield: 2, sword: 1.35, scale: 1.04, pads: true },
+  // Vanguard
+  { armor: 0x2e3038, armor2: 0x666c7c, cloth: 0x8a1030, trim: 0xf0c048, metal: 0x767c8c, blade: 0xd0d8e4, helm: 3, shield: 2, sword: 1.5, scale: 1.08, pads: true, cape: 0x7a1030, stones: 2 },
+  // Warbringer
+  { armor: 0x1e2028, armor2: 0x4a4e5e, cloth: 0x5a0c1c, trim: 0xffd060, metal: 0xe0b848, blade: 0xe0e6f0, helm: 4, shield: 3, sword: 1.7, scale: 1.13, pads: true, cape: 0x5a0c1c, stones: 3 },
+  // Titan
+  { armor: 0x8a7a48, armor2: 0xd8cc9a, cloth: 0xe8dcb0, trim: 0xffe890, metal: 0xf0cc60, blade: 0xf4f0e0, helm: 5, shield: 3, sword: 1.9, scale: 1.2, pads: true, cape: 0xe8dcb0, stones: 4, halo: true },
+];
+
+/** Same interface as Mage so the game can swap heroes freely. */
+export class Warrior {
+  constructor() {
+    this.root = new THREE.Group();
+    this.tier = -1;
+    this.orbColor = new THREE.Color(0xff4a3a);
+    this.phase = 0; this.castK = 0; this.hurtK = 0; this.deadT = -1; this.t = 0; this.swing = 0;
+    this.orbMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this.haloMat = new THREE.SpriteMaterial({ map: glowTexture, color: 0xffffff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true });
+    this.light = new THREE.PointLight(0xff4a3a, 10, 22, 1.5);
+    this.build(0);
+  }
+
+  build(tier) {
+    if (tier === this.tier) return;
+    this.tier = tier;
+    const T = this.T = WARRIOR_TIERS[tier];
+    this.root.traverse(o => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+    this.root.clear();
+    this.root.scale.setScalar(T.scale);
+    const body = this.body = new THREE.Group();
+    this.root.add(body);
+    const hip = this.hip = new THREE.Group();
+    hip.position.y = 0.95;
+    body.add(hip);
+    const skin = 0xd8a078;
+
+    // ---- legs
+    const legGeo = () => {
+      const b = new GeoBuilder();
+      b.add(cyl(0.17, 0.13, 0.5, 6), T.armor, M(0, -0.25, 0), T.armor2);
+      b.add(sph(0.14, 6, 4), T.metal, M(0, -0.5, 0.03));
+      b.add(cyl(0.13, 0.11, 0.38, 6), T.armor, M(0, -0.7, 0));
+      b.add(box(0.22, 0.14, 0.36), 0x2a1c14, M(0, -0.9, 0.07));
+      return part(b, null);
+    };
+    this.legL = legGeo(); this.legL.position.set(0.2, 0, 0);
+    this.legR = legGeo(); this.legR.position.set(-0.2, 0, 0);
+    hip.add(this.legL, this.legR);
+
+    // ---- torso
+    const torso = this.torso = new THREE.Group();
+    hip.add(torso);
+    const b = new GeoBuilder(), g = new GeoBuilder();
+    b.add(cyl(0.44, 0.33, 0.72, 8), T.armor, M(0, 0.42, 0, 0, 0, 0, 1, 1, 0.72), T.armor2);
+    b.add(cyl(0.36, 0.36, 0.13, 8), 0x3a2a1c, M(0, 0.06, 0, 0, 0, 0, 1, 1, 0.76));
+    b.add(box(0.15, 0.15, 0.06), T.trim, M(0, 0.06, 0.28));
+    b.add(box(0.34, 0.5, 0.05), T.cloth, M(0, -0.22, 0.2, -0.1));                          // tabard
+    b.add(box(0.34, 0.44, 0.05), T.cloth, M(0, -0.2, -0.2, 0.1));
+    if (tier >= 1) b.add(box(0.3, 0.42, 0.04), T.cloth, M(0, 0.44, 0.31, -0.08), T.trim);     // surcoat panel
+    if (tier >= 2) b.add(box(0.5, 0.07, 0.05), T.trim, M(0, 0.7, 0.3));
+    for (const s of [-1, 1]) {
+      b.add(sph(0.2, 6, 4), T.armor2, M(s * 0.46, 0.74, 0));
+      if (T.pads) {
+        b.add(new THREE.SphereGeometry(0.27, 6, 3, 0, 6.283, 0, 1.6), T.metal, M(s * 0.5, 0.8, 0, 0, 0, s * -0.35, 1.1, 0.85, 1.1));
+        if (tier >= 3) b.add(cone(0.06, 0.28, 4), T.trim, M(s * 0.62, 1.02, 0, 0, 0, s * -0.6));
+      }
+    }
+    if (tier >= 4) for (let i = 0; i < 4; i++) g.add(new THREE.OctahedronGeometry(0.04, 0), T.trim, M(-0.15 + i * 0.1, 0.52, 0.34), null, 2.2);
+    torso.add(part(b, g));
+
+    // ---- head and helmet
+    const head = this.head = new THREE.Group();
+    head.position.set(0, 1.02, 0.03);
+    torso.add(head);
+    const hb = new GeoBuilder(), hg = new GeoBuilder();
+    hb.add(sph(0.2, 7, 5), 0xc89068, M(0, 0, 0), 0xf0c8a0);
+    hb.add(box(0.26, 0.12, 0.2), 0x6a4a34, M(0, -0.13, 0.06));                                 // jaw / stubble
+    hb.add(cone(0.045, 0.13, 4), skin, M(0, -0.02, 0.2, Math.PI / 2));
+    if (tier >= 5) for (const s of [-1, 1]) hg.add(sph(0.035, 5, 4), 0xfff0b0, M(s * 0.08, 0.03, 0.185), null, 3.5);
+    else for (const s of [-1, 1]) hb.add(sph(0.028, 5, 4), 0x16161c, M(s * 0.08, 0.03, 0.185));
+    if (T.helm === 0) {
+      hb.add(new THREE.SphereGeometry(0.21, 7, 3, 0, 6.283, 0, 1.3), 0x5a3a24, M(0, 0.02, -0.02));    // hair
+      hb.add(cyl(0.205, 0.205, 0.05, 8), T.cloth, M(0, 0.07, 0));                                      // headband
+    } else {
+      hb.add(new THREE.SphereGeometry(0.235, 8, 4, 0, 6.283, 0, 1.75), T.metal, M(0, 0.02, -0.01), T.armor2);
+      hb.add(box(0.05, 0.22, 0.05), T.metal, M(0, -0.02, 0.22));                                       // nose guard
+      if (T.helm >= 2) for (const s of [-1, 1]) hb.add(box(0.05, 0.2, 0.16), T.metal, M(s * 0.2, -0.1, 0.08));
+      if (T.helm === 2) hb.add(box(0.05, 0.2, 0.42), T.cloth, M(0, 0.3, -0.04), T.trim);              // crest
+      if (T.helm >= 3) for (const s of [-1, 1]) hb.add(cone(0.065, 0.42, 5), 0xe8e0c8, M(s * 0.26, 0.24, 0, 0, 0, s * -0.75));
+      if (T.helm >= 4) { hb.add(box(0.07, 0.34, 0.5), T.cloth, M(0, 0.36, -0.06), T.trim); hb.add(cyl(0.24, 0.24, 0.05, 8), T.trim, M(0, 0.06, 0)); }
+      if (T.helm >= 5) for (let i = 0; i < 6; i++) { const a = i / 6 * 6.283; hb.add(cone(0.04, 0.2, 4), T.trim, M(Math.sin(a) * 0.22, 0.2, Math.cos(a) * 0.22)); }
+    }
+    head.add(part(hb, hg));
+
+    // ---- arms, shield, sword
+    const arm = () => {
+      const ab = new GeoBuilder();
+      ab.add(cyl(0.12, 0.11, 0.4, 6), T.armor, M(0, -0.2, 0), T.armor2);
+      ab.add(cyl(0.125, 0.12, 0.26, 6), T.metal, M(0, -0.5, 0));
+      ab.add(sph(0.1, 5, 4), tier >= 1 ? 0x3a2a1c : skin, M(0, -0.7, 0));
+      return part(ab, null);
+    };
+    this.armL = arm(); this.armL.position.set(0.52, 0.72, 0);
+    this.armR = arm(); this.armR.position.set(-0.52, 0.72, 0);
+    torso.add(this.armL, this.armR);
+    const sb = new GeoBuilder();
+    if (T.shield === 0) sb.add(cyl(0.3, 0.3, 0.06, 8), 0x5a4028, M(0.16, -0.5, 0.05, 0, 0, Math.PI / 2), 0x7a5a38);
+    else {
+      const r = 0.36 + T.shield * 0.06;
+      sb.add(cyl(r, T.shield >= 2 ? r * 0.55 : r, 0.07, T.shield >= 2 ? 6 : 10), T.cloth, M(0.17, -0.5, 0.05, 0, 0, Math.PI / 2), T.armor2);
+      sb.add(new THREE.TorusGeometry(r * 0.92, 0.035, 4, 12), T.trim, M(0.2, -0.5, 0.05, 0, Math.PI / 2, 0));
+      sb.add(sph(0.1, 6, 4), T.trim, M(0.24, -0.5, 0.05));
+    }
+    this.armL.add(part(sb, null));
+    const sword = this.sword = new THREE.Group();
+    const wb = new GeoBuilder();
+    const L = T.sword, w = 0.07 + tier * 0.012;
+    wb.add(cyl(0.035, 0.035, 0.3, 5), 0x3a2a1c, M(0, 0, 0.02, Math.PI / 2));
+    wb.add(sph(0.055, 5, 4), T.trim, M(0, 0, -0.14));
+    wb.add(box(0.3 + tier * 0.03, 0.06, 0.06), T.trim, M(0, 0, 0.18));
+    wb.add(box(w, 0.03, L), T.blade, M(0, 0, 0.2 + L / 2));
+    wb.add(cone(w * 0.72, 0.2, 4), T.blade, M(0, 0, 0.3 + L, Math.PI / 2, 0, 0, 1, 1, 0.25));
+    sword.add(part(wb, null));
+    const edge = this.orb = new THREE.Mesh(new THREE.BoxGeometry(w * 0.3, 0.036, L * 0.92), this.orbMat);   // glowing fuller in the mark's colour
+    edge.position.set(0, 0, 0.22 + L / 2);
+    sword.add(edge);
+    this.tip = new THREE.Object3D();
+    this.tip.position.set(0, 0, 0.3 + L);
+    sword.add(this.tip);
+    const glow = this.orbGlow = new THREE.Sprite(this.haloMat);
+    glow.position.set(0, 0, 0.25 + L * 0.6);
+    glow.scale.setScalar(1.2 + tier * 0.25);
+    sword.add(glow);
+    this.light.position.set(0, 0.6, 0.8);
+    sword.add(this.light);
+    sword.position.set(0, -0.7, 0.02);
+    this.armR.add(sword);
+
+    // ---- cape, spirit blades, halo
+    this.cape = null;
+    if (T.cape) {
+      const cb = new GeoBuilder();
+      const mid = new THREE.Color(T.cape).multiplyScalar(0.7).getHex();
+      for (let i = 0; i < 4; i++) cb.add(box(0.8 + i * 0.1, 0.42, 0.04), i % 2 ? mid : T.cape, M(0, -0.2 - i * 0.4, -0.02 - i * i * 0.035, 0.1 + i * 0.09));
+      cb.add(box(1.14, 0.07, 0.05), T.trim, M(0, -1.6, -0.34, 0.37));
+      this.cape = part(cb, null);
+      this.cape.position.set(0, 0.86, -0.26);
+      torso.add(this.cape);
+    }
+    this.stones = [];
+    for (let i = 0; i < (T.stones || 0); i++) {
+      const s = new THREE.Mesh(new THREE.OctahedronGeometry(0.12, 0), this.orbMat);
+      s.scale.set(0.35, 3.2, 0.12);
+      this.root.add(s); this.stones.push(s);
+    }
+    this.halo = null;
+    if (T.halo) {
+      this.halo = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.025, 5, 20), new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffe890).multiplyScalar(3) }));
+      this.halo.rotation.x = Math.PI / 2;
+      this.halo.position.y = 0.62;
+      head.add(this.halo);
+    }
+    this.setElement(this.orbColor);
+  }
+
+  setElement(color) {
+    this.orbColor.set(color);
+    this.orbMat.color.copy(this.orbColor).lerp(_white, 0.3).multiplyScalar(2.4);
+    this.haloMat.color.copy(this.orbColor);
+    this.light.color.copy(this.orbColor);
+  }
+
+  update(dt, s) {
+    this.t += dt;
+    const t = this.t, body = this.body;
+    if (s.dead) {
+      if (this.deadT < 0) this.deadT = 0;
+      this.deadT += dt;
+      const k = clamp(this.deadT / 0.55), e = 1 - (1 - k) * (1 - k);
+      body.rotation.x = -1.5 * e;
+      body.position.y = -0.55 * e + Math.sin(k * Math.PI) * 0.25;
+      body.position.z = -0.5 * e;
+      this.armR.rotation.x = -0.4 - e * 1.2; this.armL.rotation.x = -e * 1.4;
+      this.light.intensity = damp(this.light.intensity, 0, 6, dt);
+      return;
+    }
+    if (this.deadT >= 0) { this.deadT = -1; body.rotation.set(0, 0, 0); body.position.set(0, 0, 0); }
+    // each cast is one full swing: wind up fast, cut through, recover
+    if (s.casting && this.swing <= 0) this.swing = 1;
+    this.swing = Math.max(0, this.swing - dt * 5.2);
+    const sw = this.swing, cut = sw > 0 ? Math.sin((1 - sw) * Math.PI) : 0;
+    this.hurtK = damp(this.hurtK, s.hurt ? 1 : 0, s.hurt ? 40 : 8, dt);
+    const run = s.moving ? (s.speed ?? 1) : 0;
+    this.runK = damp(this.runK ?? 0, run, 8, dt);
+    this.phase += dt * (5 + 10 * this.runK);
+    const ph = this.phase, rk = this.runK;
+    body.position.y = Math.abs(Math.sin(ph)) * 0.09 * rk + Math.sin(t * 2.1) * 0.012 * (1 - rk);
+    body.rotation.x = 0.24 * rk - this.hurtK * 0.25;
+    this.hip.rotation.y = Math.sin(ph) * 0.1 * rk;
+    this.legL.rotation.x = Math.sin(ph) * 0.95 * rk;
+    this.legR.rotation.x = -Math.sin(ph) * 0.95 * rk;
+    this.torso.rotation.y = -Math.sin(ph) * 0.14 * rk + (sw > 0 ? (0.5 - (1 - sw)) * 1.3 : 0);
+    this.torso.rotation.x = 0.08 + cut * 0.22;
+    this.head.rotation.y = Math.sin(t * 0.7) * 0.1 * (1 - rk) - this.torso.rotation.y * 0.5;
+    this.armL.rotation.x = -0.55 + Math.sin(ph) * 0.35 * rk;        // shield held forward
+    this.armL.rotation.z = 0.25;
+    this.armL.rotation.y = -0.5;
+    // sword arm: carried low while sprinting, raised and brought across when striking
+    this.armR.rotation.x = sw > 0 ? -2.5 + (1 - sw) * 2.9 : -0.35 - Math.sin(ph) * 0.5 * rk;
+    this.armR.rotation.z = -0.25 - cut * 0.5;
+    this.sword.rotation.x = sw > 0 ? -0.5 - cut * 0.5 : -0.9;
+    if (this.cape) this.cape.rotation.x = 0.12 + rk * 0.75 + Math.sin(ph * 0.5) * 0.08 * rk + Math.sin(t * 1.7) * 0.03;
+    const pulse = 1 + Math.sin(t * 5) * 0.1 + cut * 0.8;
+    this.orb.scale.set(1 + cut * 1.5, 1, 1);
+    this.orbGlow.scale.setScalar((1.2 + this.tier * 0.25) * pulse);
+    this.light.intensity = (9 + this.tier * 2) * (1 + cut * 1.4);
+    for (let i = 0; i < this.stones.length; i++) {
+      const a = t * 1.4 + i * (6.283 / this.stones.length);
+      this.stones[i].position.set(Math.sin(a) * 1.15, 1.5 + Math.sin(t * 2 + i * 2) * 0.2, Math.cos(a) * 1.15);
+      this.stones[i].rotation.set(0.3, -a, 0.2);
+    }
+    if (this.halo) this.halo.rotation.z = t * 0.8;
+  }
+
+  /** World position of the sword tip (where effects come from). */
+  getStaffTip(out) { this.tip.getWorldPosition(out); return out; }
 }

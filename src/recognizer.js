@@ -1,7 +1,7 @@
 // Rune recogniser: a $1-unistroke style matcher, tuned to be orientation-aware
 // (a rune is not the same rune upside-down unless we say so) and to return a
 // "quality" score that feels fair for finger drawing.
-import { RUNES, RUNE_ORDER } from './data.js';
+import { RUNES } from './data.js';
 
 const N = 64;
 const SIZE = 250;
@@ -86,16 +86,12 @@ function distAtBestAngle(pts, tpl) {
 function variants(rune) {
   const g = rune.glyph;
   const out = [];
-  const rots = rune.id === 'ember' ? [0, Math.PI]                     // point up or down
-    : rune.id === 'frost' ? [0, Math.PI / 2]                          // hourglass or bow-tie
-    : rune.id === 'void' ? [0, Math.PI]
-    : [0];
-  for (const r of rots) {
+  for (const r of rune.rots || [0]) {
     const base = rotate(g, r);
     const paths = [];
     if (rune.closed) {
       const ring = base.slice(0, -1);
-      const step = rune.id === 'arcane' ? 5 : 1;
+      const step = ring.length > 12 ? 5 : 1;
       for (let s = 0; s < ring.length; s += step) {
         const p = ring.slice(s).concat(ring.slice(0, s));
         p.push(p[0]);
@@ -103,7 +99,7 @@ function variants(rune) {
       }
     } else {
       paths.push(base);
-      paths.push(base.map(p => [-p[0], p[1]]));   // mirrored bolt
+      paths.push(base.map(p => [-p[0], p[1]]));   // mirrored: either hand, either way round
     }
     for (const p of paths) { out.push(p); out.push(p.slice().reverse()); }
   }
@@ -111,8 +107,8 @@ function variants(rune) {
 }
 
 const TEMPLATES = [];
-for (const id of RUNE_ORDER) {
-  for (const v of variants(RUNES[id])) TEMPLATES.push({ id, pts: normalize(v) });
+for (const id in RUNES) {
+  for (const v of variants(RUNES[id])) TEMPLATES.push({ id, cls: RUNES[id].cls, pts: normalize(v) });
 }
 
 function scoreToQuality(score) {
@@ -123,9 +119,10 @@ function scoreToQuality(score) {
 /**
  * @param points  [[x,y],...] in screen space
  * @param unlocked array of rune ids the player may cast
+ * @param pool     every rune id of the current class (locked ones are recognised but refused)
  * @returns { ok, rune, score, quality, reason?, locked? }
  */
-export function recognize(points, unlocked) {
+export function recognize(points, unlocked, pool = unlocked) {
   if (!points || points.length < 8) return { ok: false, reason: 'short' };
   const bb = bbox(points);
   if (Math.max(bb.w, bb.h) < 40 || pathLength(points) < 120) return { ok: false, reason: 'short' };
@@ -133,6 +130,7 @@ export function recognize(points, unlocked) {
   if (!pts) return { ok: false, reason: 'short' };
   const best = {};
   for (const t of TEMPLATES) {
+    if (!pool.includes(t.id)) continue;
     const d = distAtBestAngle(pts, t.pts);
     if (best[t.id] === undefined || d < best[t.id]) best[t.id] = d;
   }
@@ -145,9 +143,9 @@ export function recognize(points, unlocked) {
   let dev = 0;
   for (const p of pts) dev += (Math.hypot(p[0], p[1]) - mean) ** 2;
   const cv = Math.sqrt(dev / pts.length) / mean;
-  const score = id => 1 - best[id] / HALF_DIAG - (id === 'arcane' ? Math.max(0, cv - 0.045) * 1.6 : 0);
+  const score = id => 1 - best[id] / HALF_DIAG - (id === 'arcane' ? Math.max(0, cv - 0.1) * 1.2 : 0);
   let top = null, topAny = null;
-  for (const id of RUNE_ORDER) {
+  for (const id of pool) {
     const s = score(id);
     if (!topAny || s > topAny.s) topAny = { id, s };
     if (unlocked.includes(id) && (!top || s > top.s)) top = { id, s };

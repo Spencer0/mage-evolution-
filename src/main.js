@@ -1,15 +1,15 @@
-// Mage Evolution: game flow. title -> draw rune(s) -> run -> results -> shop -> draw ...
+// Mage Evolution: game flow. title -> [choose hero] -> draw rune(s) -> run -> results -> shop -> ...
 import * as THREE from 'three';
 import { World } from './world.js';
-import { Mage, OrcPool } from './actors.js';
+import { Mage, Warrior, OrcPool } from './actors.js';
 import { Vfx, ELEMENT_COLOR, ORC_HEIGHT } from './vfx.js';
 import { Sfx } from './audio.js';
 import { UI } from './ui.js';
 import { RuneInput } from './runeInput.js';
 import { RunSim } from './sim.js';
 import {
-  RUNES, UPGRADE_BY_ID, upgradeCost, computeStats, newSave, runePower, runeGrade, runeTempo,
-  evolutionTier, biomeAt, fmt, CAVE_LENGTH, ENEMIES,
+  RUNES, CLASSES, CLASS_SCREEN_AFTER_RUNS, findUpgrade, upgradeCost, computeStats, newSave, migrateSave,
+  runePower, runeGrade, runeTempo, evolutionTier, biomeAt, fmt, ENEMIES,
 } from './data.js';
 import { damp } from './geo.js';
 
@@ -21,7 +21,7 @@ const _v = new THREE.Vector3();
 function loadSave() {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (raw) { const s = JSON.parse(raw); if (s && s.v === 1) return Object.assign(newSave(), s); }
+    if (raw) return migrateSave(JSON.parse(raw));
   } catch (e) { /* storage unavailable: play without saving */ }
   return newSave();
 }
@@ -34,10 +34,16 @@ class Game {
     this.world = new World($('scene'));
     const scene = this.world.scene;
 
-    this.mage = new Mage();
-    this.mage.root.rotation.y = Math.PI;          // walk into the cave (-Z)
-    this.mage.build(evolutionTier(this.save));
-    scene.add(this.mage.root);
+    // one model per class; only the current one is shown
+    this.heroes = { mage: new Mage(), warrior: new Warrior() };
+    for (const id in this.heroes) {
+      const h = this.heroes[id];
+      h.root.rotation.y = Math.PI;                // run into the cave (-Z)
+      h.build(evolutionTier(this.save, id));
+      h.root.visible = false;
+      scene.add(h.root);
+    }
+    this.setHero(this.save.cur);
     this.fill = new THREE.PointLight(0xffe6c8, 0, 34, 1.4);
     scene.add(this.fill);
 
@@ -64,8 +70,6 @@ class Game {
     this.chosen = [];
     this.fizzles = 0;
     this.biome = null;
-    this.element = this.save.lastRunes[0] ? RUNES[this.save.lastRunes[0]].element : 'fire';
-    this.mage.setElement(RUNES[this.save.lastRunes[0] || 'ember'].color);
     this.focus = new THREE.Vector3(0, 0, 0);
     this.t = 0;
 
@@ -86,6 +90,21 @@ class Game {
     this.frame = this.frame.bind(this);
     requestAnimationFrame(this.frame);
     requestAnimationFrame(() => this.ui.loaded());
+  }
+
+  /** The hero on screen. Kept under the old name: most of the flow just says "mage". */
+  get mage() { return this.hero; }
+  get mine() { return this.save.cls[this.save.cur]; }
+  setHero(cls) {
+    this.save.cur = cls;
+    const pos = this.hero ? this.hero.root.position : null;
+    for (const id in this.heroes) this.heroes[id].root.visible = id === cls;
+    this.hero = this.heroes[cls];
+    if (pos) this.hero.root.position.copy(pos);
+    const last = this.mine.lastRunes[0] && RUNES[this.mine.lastRunes[0]] ? this.mine.lastRunes[0] : CLASSES[cls].starter;
+    this.hero.setElement(RUNES[last].color);
+    this.element = RUNES[last].element;
+    this.stats = computeStats(this.save);
   }
 
   persist() { try { localStorage.setItem(SAVE_KEY, JSON.stringify(this.save)); } catch (e) { /* ignore */ } }
@@ -109,6 +128,7 @@ class Game {
     if (this.state === 'shop') { if (w.portrait) { s.x = 0.2; s.y = -0.27; } else { s.x = -0.29; s.y = 0.02; } }
     else if (this.state === 'draw') { s.x = 0; s.y = (this.rune.cy - this.rune.h / 2) / this.rune.h + 0.02; }
     else if (this.state === 'title') { s.x = 0; s.y = 0.06; }
+    else if (this.state === 'classes') { s.x = 0; s.y = w.portrait ? -0.16 : -0.12; }
     else { s.x = 0; s.y = 0; }
   }
   setState(s) { this.state = s; this.applyViewShift(); }
@@ -118,6 +138,53 @@ class Game {
     this.sfx.unlock();
     this.sfx.click();
     if (this.save.runs > 0) this.toShop(false); else this.toDraw();
+  }
+
+  /** Shop -> cave. Once the player has a couple of runs behind them, they choose a hero first. */
+  goCave() {
+    if (this.save.runs >= CLASS_SCREEN_AFTER_RUNS) this.toClasses(); else this.toDraw();
+  }
+  toClasses() {
+    this.sfx.click();
+    this.setState('classes');
+    this.world.setCamera('draw');
+    this.ui.showClasses(this.save);
+  }
+  pickClass(id) {
+    const C = CLASSES[id], mine = this.save.cls[id];
+    if (!mine.unlocked) {
+      if (this.save.gold < C.cost) { this.sfx.deny(); this.ui.classDenied(id); return; }
+      this.save.gold -= C.cost;
+      mine.unlocked = true;
+      this.setHero(id);
+      this.persist();
+      this.sfx.evolve();
+      this.world.flash(0xffe0a0, 0.9);
+      const p = this.hero.root.position;
+      this.vfx.burst(p.x, 1.6, p.z, ELEMENT_COLOR.phys, 110, 9, 0.7, 1.3, { up: 0.6, drag: 1.4 });
+      this.ui.showClasses(this.save);
+      return;
+    }
+    this.setHero(id);
+    this.persist();
+    this.toDraw();
+  }
+  switchClass(id) {
+    if (!this.save.cls[id].unlocked || id === this.save.cur) return;
+    this.sfx.click();
+    this.setHero(id);
+    this.persist();
+    this.ui.buildShop(this.save);
+  }
+  pickBoon(i) {
+    if (!this.sim || !this.sim.offer) return;
+    const b = this.sim.chooseBoon(i);
+    this.ui.hideBoons();
+    this.ui.addBoon(b);
+    this.ui.banner(b.name, b.desc, '#ffe9a6');
+    this.sfx.revive();
+    this.world.flash(0xffe0a0, 0.5);
+    for (const ev of this.sim.drainEvents()) this.onEvent(ev);
   }
 
   toDraw() {
@@ -131,16 +198,17 @@ class Game {
     this.nextRune();
   }
   nextRune() {
-    const first = this.save.runs === 0;
-    this.ui.setupDraw({ index: this.chosen.length, count: this.stats.slots, chosen: this.chosen, unlocked: this.stats.runes, canShop: this.save.runs > 0, first });
+    const C = CLASSES[this.save.cur];
+    const first = this.mine.runs === 0;
+    this.ui.setupDraw({ index: this.chosen.length, count: this.stats.slots, chosen: this.chosen, unlocked: this.stats.runes, canShop: this.save.runs > 0, first, cls: this.save.cur });
     this.layoutDraw();
-    this.rune.begin(this.stats.runes, (res, dur) => this.onStroke(res, dur));
-    if (first) { this.rune.showGuide('ember'); this.ui.selectRuneCard('ember'); }
+    this.rune.begin(this.stats.runes, (res, dur) => this.onStroke(res, dur), C.runes);
+    if (first && this.chosen.length === 0) { this.rune.showGuide(C.starter); this.ui.selectRuneCard(C.starter); }
   }
   onRuneCard(id, has) {
     if (!has) {
       this.sfx.deny();
-      this.ui.runeFizzle('Not yet learned', `Buy the ${RUNES[id].name} rune in the shop.`);
+      this.ui.runeFizzle('Not yet learned', `Buy ${RUNES[id].name} in the shop.`);
       return;
     }
     this.sfx.click();
@@ -154,8 +222,8 @@ class Game {
       this.sfx.fizzle();
       this.rune.reject();
       this.fizzles++;
-      if (res.reason === 'locked') this.ui.runeFizzle('Unknown rune', `That looks like ${RUNES[res.locked].name}. You have not learned it yet.`);
-      else this.ui.runeFizzle('The rune fizzles', 'One clean stroke. Tap a rune below to see its shape.');
+      if (res.reason === 'locked') this.ui.runeFizzle('Not yet learned', `That looks like ${RUNES[res.locked].name}. You have not learned it yet.`);
+      else this.ui.runeFizzle('It fizzles', 'One clean stroke. Tap a card below to see its shape.');
       if (this.fizzles >= 2 && !this.rune.guide) { this.rune.showGuide(this.stats.runes[0]); this.ui.selectRuneCard(this.stats.runes[0]); }
       return;
     }
@@ -187,7 +255,7 @@ class Game {
     });
   }
   startRun() {
-    this.save.lastRunes = this.chosen.map(c => c.rune);
+    this.mine.lastRunes = this.chosen.map(c => c.rune);
     this.sim = new RunSim({ stats: this.stats, slots: this.chosen, seed: (Math.random() * 1e9) | 0 });
     this.orcs.clear();
     this.vfx.reset();
@@ -197,17 +265,18 @@ class Game {
     this.setState('run');
     this.world.setCamera('run', true);
     this.ui.show('hud');
-    this.ui.startRun(this.chosen, this.save.bestDepth);
+    this.ui.startRun(this.chosen, this.mine.bestDepth);
     this.sfx.setBeat(true, 0);
     this.syncActors(0);
   }
 
   endRun() {
     const sim = this.sim, save = this.save;
-    const sum = sim.summary(save.bestDepth);
-    save.gold += sum.total; save.totalGold += sum.total; save.runs++;
-    save.bestDepth = Math.max(save.bestDepth, sum.depth);
-    save.bestKills = Math.max(save.bestKills, sum.kills);
+    const mine = this.mine;
+    const sum = sim.summary(mine.bestDepth);
+    save.gold += sum.total; save.totalGold += sum.total; save.runs++; mine.runs++;
+    mine.bestDepth = Math.max(mine.bestDepth, sum.depth);
+    this.ui.hideBoons();
     if (sum.victory) { save.victories++; save.bestTime = save.bestTime ? Math.min(save.bestTime, sum.time) : sum.time; }
     this.persist();
     this.sfx.setBeat(false);
@@ -236,13 +305,14 @@ class Game {
   }
 
   buy(id) {
-    const u = UPGRADE_BY_ID[id], save = this.save;
-    const lvl = save.upgrades[id] || 0;
+    const save = this.save, u = findUpgrade(save.cur, id), up = this.mine.upgrades;
+    if (!u) return;
+    const lvl = up[id] || 0;
     if (lvl >= u.max) return;
     const cost = upgradeCost(u, lvl);
     if (save.gold < cost) { this.sfx.deny(); this.ui.boughtFx(id, false); return; }
     save.gold -= cost;
-    save.upgrades[id] = lvl + 1;
+    up[id] = lvl + 1;
     this.stats = computeStats(save);
     this.sfx.buy(lvl);
     this.ui.refreshShop(save);
@@ -263,8 +333,7 @@ class Game {
     this.vfx.flash(p.x, 1.6, p.z, c, 4, 0.5, 3);
     this.vfx.light(p.x, 2.5, p.z, c, 900, 0.9);
     this.mage.build(tier);
-    this.save.seenTier = tier;
-    this.ui.showEvolve(tier);
+    this.ui.showEvolve(tier, this.save.cur);
   }
   toggleMute() {
     this.save.muted = !this.save.muted;
@@ -276,9 +345,8 @@ class Game {
   resetProgress() {
     this.save = newSave();
     this.persist();
-    this.stats = computeStats(this.save);
-    this.mage.build(0);
-    this.mage.setElement(RUNES.ember.color);
+    for (const id in this.heroes) this.heroes[id].build(0);
+    this.setHero('mage');
     this.ui.closeMenu();
     this.ui.setTitle(this.save);
     this.setState('title');
@@ -297,6 +365,7 @@ class Game {
         if (ev.e.type === 'loot') { ui.toast('Loot hauler! Drop it before it runs.'); sfx.lootSpotted(); }
         break;
       case 'cast': sfx.cast(ev.rune); ui.slotFired(ev.slot); break;
+      case 'boonOffer': this.slow(0.15, 0.3); ui.showBoons(ev.offer); sfx.tally(); break;
       case 'explode': sfx.explode(ev.kind); break;
       case 'meteor': sfx.meteorFall(); break;
       case 'hit': {

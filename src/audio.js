@@ -120,6 +120,11 @@ export class Sfx {
     else if (rune === 'storm') { this.tone({ type: 'sawtooth', f0: 2200, f1: 180, dur: 0.1, gain: 0.07 }); this.noise({ f0: 4000, dur: 0.09, gain: 0.09, type: 'highpass' }); }
     else if (rune === 'frost') { this.tone({ type: 'triangle', f0: 1500, f1: 2600, dur: 0.14, gain: 0.07, echo: 0.3 }); this.noise({ f0: 6000, dur: 0.1, gain: 0.05, type: 'highpass' }); }
     else if (rune === 'arcane') { for (let i = 0; i < 3; i++) this.tone({ f0: 560 + i * 140, f1: 980 + i * 180, dur: 0.11, gain: 0.05, when: i * 0.05, echo: 0.3 }); }
+    else if (rune === 'cleave') { this.noise({ f0: 700, f1: 3200, dur: 0.12, gain: 0.09, type: 'bandpass', q: 1.5 }); this.tone({ type: 'triangle', f0: 320, f1: 140, dur: 0.1, gain: 0.05 }); }
+    else if (rune === 'hurl') { this.noise({ f0: 1200, f1: 3000, dur: 0.14, gain: 0.07, type: 'bandpass', q: 3 }); }
+    else if (rune === 'quake') { this.tone({ f0: 90, f1: 34, dur: 0.4, gain: 0.26 }); this.noise({ f0: 700, f1: 80, dur: 0.35, gain: 0.16 }); }
+    else if (rune === 'whirl') { this.noise({ f0: 500, f1: 1800, dur: 0.16, gain: 0.05, type: 'bandpass', q: 2 }); }
+    else if (rune === 'crown') { this.tone({ type: 'triangle', f0: 1320, f1: 660, dur: 0.4, gain: 0.08, echo: 0.6 }); this.noise({ f0: 4000, f1: 600, dur: 0.38, gain: 0.06, attack: 0.25 }); }
     else if (rune === 'void') { this.tone({ f0: 160, f1: 38, dur: 0.9, gain: 0.2 }); this.noise({ f0: 200, f1: 2400, dur: 0.8, gain: 0.07, attack: 0.5 }); }
   }
   explode(kind) {

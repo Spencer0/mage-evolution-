@@ -1,7 +1,7 @@
 // Headless run simulation. No rendering, no DOM: the renderer reads state and
 // drains `events`; tools/balance.mjs drives the very same code to tune numbers.
 import {
-  RUNES, ENEMIES, CHAMPIONS, CAVE_LENGTH, MAGE_SPEED, SPAWN_AHEAD, CAST_RANGE,
+  RUNES, ENEMIES, CHAMPIONS, CAVE_LENGTH, MAGE_SPEED, SPAWN_AHEAD, CAST_RANGE, ELEMENTS, BOONS, newMods,
   depthHp, depthDmg, depthGold, packBudget,
 } from './data.js';
 
@@ -25,7 +25,7 @@ function generatePacks(rng, stats) {
   const packs = [];
   let d = 11, n = 0;
   while (d < CAVE_LENGTH - 40) {
-    const nearChampion = CHAMPIONS.some(c => Math.abs(c.d - d) < 9);
+    const nearChampion = CHAMPIONS.some(c => Math.abs(c.d - d) < 7);
     if (!nearChampion) {
       const horde = n > 5 && n % 13 === 12;
       let budget = packBudget(d) * (horde ? 1.8 : d < 50 ? 1 : 0.7 + rng() * 0.6);
@@ -55,7 +55,7 @@ function generatePacks(rng, stats) {
     n++;
     d += 5.4 + rng() * 3.2 - 1.2 * (d / CAVE_LENGTH);
   }
-  for (const c of CHAMPIONS) packs.push({ d: c.d, members: ['champion', 'grunt', 'grunt', 'whelp', 'whelp'], championName: c.name });
+  for (const c of CHAMPIONS) packs.push({ d: c.d, members: ['champion', 'grunt', 'whelp', 'whelp'], championName: c.name });
   packs.push({ d: CAVE_LENGTH, members: ['boss'] });
   packs.sort((a, b) => a.d - b.d);
   return packs;
@@ -89,9 +89,9 @@ export class RunSim {
     this.packIdx = 0;
     this.gold = 0;
     this.kills = 0;
-    this.combo = 0;
-    this.comboT = 0;
-    this.bestCombo = 0;
+    this.mod = newMods();        // run-only boons from slain champions
+    this.boons = [];
+    this.offer = null;           // [boon, boon] while the run waits for a choice
     this.over = false;
     this.victory = false;
     this.boss = null;
@@ -161,20 +161,22 @@ export class RunSim {
     }
     return best;
   }
-  pickTarget() {
+  pickTarget(range = CAST_RANGE) {
     const m = this.mage;
     let best = null, bd = Infinity;
     for (const e of this.enemies) {
-      if (!this.inRange(e)) continue;
-      const q = Math.hypot(e.x - m.x, e.d - m.d) - (e.fleeing ? 4 : 0);
+      if (!e.alive) continue;
+      const dist = Math.hypot(e.x - m.x, e.d - m.d);
+      if (dist > range + e.r || e.d - m.d < -9) continue;
+      const q = dist - (e.fleeing ? 4 : 0);
       if (q < bd) { bd = q; best = e; }
     }
     return best;
   }
-  clusterTarget(radius) {
+  clusterTarget(radius, range = CAST_RANGE) {
     let best = null, bn = -1;
     for (const e of this.enemies) {
-      if (!this.inRange(e)) continue;
+      if (!this.inRange(e, range)) continue;
       let n = e.def.elite ? 2 : 0;
       for (const o of this.enemies) {
         if (o.alive && Math.hypot(o.x - e.x, o.d - e.d) < radius) n += o.def.heavy ? 2 : 1;
@@ -185,14 +187,34 @@ export class RunSim {
   }
 
   // ------------------------------------------------------------ casting
-  hasteMult() {
-    const s = this.stats;
-    return s.haste * (1 + Math.min(this.combo, s.comboCap) * 0.005 * s.frenzy);
+  hasteMult() { return this.stats.haste * this.mod.haste; }
+
+  /** Take one of the two boons on offer and resume the run. */
+  chooseBoon(i) {
+    if (!this.offer) return null;
+    const b = this.offer[i] || this.offer[0], m = this.mod, hero = this.mage;
+    this.offer = null;
+    this.boons.push(b.id);
+    for (const k in b.mod) {
+      if (k === 'echo' || k === 'crit' || k === 'leech') m[k] += b.mod[k]; else m[k] *= b.mod[k];
+    }
+    if (b.mod.hp) { hero.maxHp *= b.mod.hp; hero.maxShield *= b.mod.hp; hero.hp = hero.maxHp; hero.shield = hero.maxShield; }
+    this.emit({ type: 'boonTaken', boon: b });
+    return b;
+  }
+  offerBoons() {
+    const pool = BOONS.filter(b => !this.boons.includes(b.id));
+    if (pool.length < 2 || !this.mage.alive) return;
+    const a = pool.splice((this.rng() * pool.length) | 0, 1)[0];
+    const b = pool[(this.rng() * pool.length) | 0];
+    this.offer = [a, b];
+    this.emit({ type: 'boonOffer', offer: this.offer });
   }
 
   cast(slot, echo) {
     const m = this.mage, def = slot.def, s = this.stats;
-    const target = def.id === 'void' ? this.clusterTarget(def.radius) : this.pickTarget();
+    const range = def.range || CAST_RANGE;
+    const target = def.id === 'void' || def.id === 'crown' ? this.clusterTarget(def.radius, range) : this.pickTarget(range);
     if (!target) return false;
     const dmg = def.dmg * s.dmgMult * slot.power;
     const ox = m.x + 0.55, od = m.d + 0.7;
@@ -249,8 +271,56 @@ export class RunSim {
         });
         this.emit({ type: 'zone', z: this.zones[this.zones.length - 1] });
         break;
+      // ---- warrior
+      case 'cleave': {
+        const ang = Math.atan2(target.x - m.x, target.d - m.d);
+        this.emit({ type: 'slash', x: m.x, d: m.d, ang, r: def.reach, arc: def.arc });
+        for (const e of this.enemies) {
+          if (!e.alive) continue;
+          const dx = e.x - m.x, dd = e.d - m.d, dist = Math.hypot(dx, dd);
+          if (dist > def.reach + e.r) continue;
+          let da = Math.atan2(dx, dd) - ang;
+          while (da > Math.PI) da -= Math.PI * 2;
+          while (da < -Math.PI) da += Math.PI * 2;
+          if (Math.abs(da) > def.arc && dist > 1.4) continue;
+          if (!e.def.heavy) { e.kx += (dx / (dist + 0.1)) * 3; e.kd += (dd / (dist + 0.1)) * 3; }
+          this.damage(e, dmg, 'steel');
+        }
+        break;
+      }
+      case 'hurl': {
+        const dx = target.x - ox, dd = target.d - od, l = Math.hypot(dx, dd) || 1;
+        this.projectiles.push({
+          id: NEXT_ID++, kind: 'haxe', x: ox, d: od, vx: (dx / l) * 40, vd: (dd / l) * 40,
+          dmg, pierce: def.pierce, hit: new Set(), life: 0.6, element: 'iron',
+        });
+        break;
+      }
+      case 'quake':
+        this.explode(m.x, m.d, def.radius, dmg, 'earth', 'quake', { knock: 4 });
+        for (const e of this.enemies) {
+          if (e.alive && !e.def.elite && Math.hypot(e.x - m.x, e.d - m.d) < def.radius + e.r) e.stunT = Math.max(e.stunT, 0.55);
+        }
+        break;
+      case 'whirl': {
+        let hits = 0;
+        this.emit({ type: 'whirl', x: m.x, d: m.d, r: def.radius });
+        for (const e of this.enemies) {
+          if (!e.alive || Math.hypot(e.x - m.x, e.d - m.d) > def.radius + e.r) continue;
+          this.damage(e, dmg, 'blood');
+          hits++;
+        }
+        if (hits && m.alive) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * def.heal * Math.min(hits, 5));
+        break;
+      }
+      case 'crown': {
+        const x = target.x, d = Math.max(m.d + 2, target.d - (target.moving && !target.engaged ? 3 : 0));
+        this.emit({ type: 'meteor', x, d, delay: 0.38, r: def.radius, spirit: true });
+        this.pending.push({ t: 0.38, fn: () => this.explode(x, d, def.radius, dmg, 'spirit', 'judge', { knock: 5 }) });
+        break;
+      }
     }
-    if (!echo && this.rng() < s.echo) this.pending.push({ t: 0.16, fn: () => this.cast(slot, true) });
+    if (!echo && this.rng() < s.echo + this.mod.echo) this.pending.push({ t: 0.16, fn: () => this.cast(slot, true) });
     return true;
   }
 
@@ -258,31 +328,33 @@ export class RunSim {
   damage(e, amount, element, opts = {}) {
     if (!e.alive || amount <= 0) return;
     const s = this.stats;
-    let dmg = amount, crit = false;
-    if (!opts.noCrit && s.critChance > 0 && this.rng() < s.critChance) { dmg *= s.critMult; crit = true; }
-    if (!opts.noReact) {
-      if (element === 'fire' && e.chillT > 0) {
-        dmg *= 2; e.chillT = 0;
-        this.emit({ type: 'react', name: 'thermal', x: e.x, d: e.d });
-      } else if (element === 'storm' && e.burnT > 0) {
-        e.burnT = 0;
+    const E = ELEMENTS[element] || ELEMENTS.phys, mod = this.mod;
+    let dmg = amount * mod.dmg * (e.def.heavy ? mod.heavy : 1), crit = false;
+    const critChance = s.critChance + mod.crit;
+    if (!opts.noCrit && critChance > 0 && this.rng() < critChance) { dmg *= s.critMult; crit = true; }
+    const has = st => (st === 'chill' ? e.chillT : st === 'burn' ? e.burnT : e.shockT) > 0;
+    const clear = st => { if (st === 'chill') e.chillT = 0; else if (st === 'burn') e.burnT = 0; else e.shockT = 0; };
+    const R = E.react;
+    if (!opts.noReact && R && has(R.on) && (R.kind !== 'freeze' || e.freezeImm <= 0)) {
+      clear(R.on);
+      if (R.kind === 'double') dmg *= 2;
+      else if (R.kind === 'blast') {
         const x = e.x, d = e.d, blast = amount * 1.2;
-        this.pending.push({ t: 0.05, fn: () => this.explode(x, d, 3, blast, 'fire', 'overload', { noReact: true, noStatus: true }) });
-        this.emit({ type: 'react', name: 'overload', x, d });
-      } else if (element === 'frost' && e.shockT > 0 && e.freezeImm <= 0) {
-        e.shockT = 0;
+        this.pending.push({ t: 0.05, fn: () => this.explode(x, d, 3, blast, element === 'iron' ? 'phys' : 'fire', R.name, { noReact: true, noStatus: true }) });
+      } else {
         e.freezeT = e.def.elite ? 0.6 : 1.7;
         e.freezeImm = 5;
+        e.frozenAs = R.name;
         dmg *= 1.5;
-        this.emit({ type: 'react', name: 'freeze', x: e.x, d: e.d });
       }
+      this.emit({ type: 'react', name: R.name, x: e.x, d: e.d });
     }
     if (e.shockT > 0) dmg *= 1.2;
     if (!opts.noStatus) {
-      if (element === 'fire') { e.burnT = 3; e.burnDps = Math.max(e.burnDps, amount * 0.28); }
-      else if (element === 'frost') e.chillT = 3;
-      else if (element === 'storm') e.shockT = 2.5;
-      else if (element === 'arcane') e.mark = true;
+      if (E.applies === 'burn') { e.burnT = 3; e.burnDps = Math.max(e.burnDps, amount * 0.28); e.bleed = !!E.bleed; }
+      else if (E.applies === 'chill') { e.chillT = 3; e.daze = !!E.daze; }
+      else if (E.applies === 'shock') e.shockT = 2.5;
+      else if (E.applies === 'mark') e.mark = true;
     }
     e.hp -= dmg;
     e.hitFlash = 0.12;
@@ -311,16 +383,12 @@ export class RunSim {
     e.alive = false;
     const s = this.stats;
     this.kills++;
-    this.combo++;
-    this.comboT = 2.5;
-    if (this.combo > this.bestCombo) this.bestCombo = this.combo;
-    const comboMult = 1 + Math.min(this.combo, s.comboCap) * 0.02;
-    const gold = e.gold * s.goldMult * comboMult * (e.mark ? 1.6 : 1);
+    const gold = e.gold * s.goldMult * this.mod.gold * (e.def.heavy ? s.trophy : 1) * (e.mark ? 1.6 : 1);
     this.gold += gold;
-    if (s.leech > 0 && this.mage.alive) {
-      this.mage.hp = Math.min(this.mage.maxHp, this.mage.hp + this.mage.maxHp * s.leech);
-    }
-    this.emit({ type: 'kill', e, gold, element, x: e.x, d: e.d, combo: this.combo, marked: e.mark });
+    const leech = s.leech + this.mod.leech;
+    if (leech > 0 && this.mage.alive) this.mage.hp = Math.min(this.mage.maxHp, this.mage.hp + this.mage.maxHp * leech);
+    this.emit({ type: 'kill', e, gold, element, x: e.x, d: e.d, marked: e.mark });
+    if (e.type === 'champion') this.pending.push({ t: 0.7, fn: () => this.offerBoons() });
     if (s.corpse > 0 && !e.def.elite) {
       const x = e.x, d = e.d, blast = e.maxHp * s.corpse;
       this.pending.push({ t: 0.12, fn: () => this.explode(x, d, 3.2, blast, 'phys', 'corpse', { noCrit: true, noReact: true, noStatus: true }) });
@@ -340,7 +408,7 @@ export class RunSim {
   hurtMage(amount, src) {
     const m = this.mage;
     if (!m.alive || m.invuln > 0 || this.over) return;
-    let amt = amount * this.stats.armor;
+    let amt = amount * this.stats.armor * this.mod.armor;
     m.shieldDelay = 3;
     let absorbed = 0;
     if (m.shield > 0) {
@@ -367,7 +435,7 @@ export class RunSim {
 
   // ------------------------------------------------------------ step
   step(dt) {
-    if (this.over) return;
+    if (this.over || this.offer) return;
     this.t += dt;
     const m = this.mage, s = this.stats;
 
@@ -394,15 +462,10 @@ export class RunSim {
         if (fd > -0.6 && fd < e.r + 1.6 && Math.abs(e.x - m.x) < e.r + 1.5) wall = true;
       } else if (e.engaged) drag++;
     }
-    const want = wall ? 0 : Math.max(0.42, 1 - 0.1 * drag);
+    const want = wall ? 0 : Math.max(0.42, 1 - 0.1 * drag * this.mod.drag * s.drag) * this.mod.speed;
     m.speedFrac += (want - m.speedFrac) * Math.min(1, dt * (want < m.speedFrac ? 12 : 5));
     m.blocked = m.speedFrac < 0.12;
     m.d = Math.min(CAVE_LENGTH - 4, m.d + MAGE_SPEED * m.speedFrac * dt);
-
-    if (this.comboT > 0) {
-      this.comboT -= dt;
-      if (this.comboT <= 0) { this.combo = 0; this.emit({ type: 'comboEnd' }); }
-    }
 
     // --- spells
     if (!this.bossDead) {
@@ -626,13 +689,14 @@ export class RunSim {
           } else { p.x += (dx / dist) * stepLen; p.d += (dd / dist) * stepLen; }
           break;
         }
+        case 'haxe':
         case 'lance': {
           p.x += p.vx * dt; p.d += p.vd * dt;
           for (const e of this.enemies) {
             if (!e.alive || p.hit.has(e.id)) continue;
             if (Math.hypot(e.x - p.x, e.d - p.d) < e.r + 0.75) {
               p.hit.add(e.id);
-              this.damage(e, p.dmg, 'frost');
+              this.damage(e, p.dmg, p.element || 'frost');
               p.dmg *= 0.88;
               if (--p.pierce <= 0) { p.dead = true; break; }
             }
@@ -721,7 +785,7 @@ export class RunSim {
     const recordBonus = record ? Math.floor((killGold + depthBonus) * 0.2) : 0;
     const victoryBonus = this.victory ? Math.floor((killGold + depthBonus) * 0.5) : 0;
     return {
-      depth, time: this.t, kills: this.kills, bestCombo: this.bestCombo, victory: this.victory,
+      depth, time: this.t, kills: this.kills, boons: this.boons.slice(), victory: this.victory,
       killGold, depthBonus, record, recordBonus, victoryBonus,
       total: killGold + depthBonus + recordBonus + victoryBonus,
     };

@@ -1,6 +1,6 @@
 // DOM layer: HUD, grimoire, results tally, shop and overlays.
 import {
-  RUNES, RUNE_ORDER, UPGRADES, UPGRADE_BY_ID, CATEGORIES, upgradeCost, EVOLUTIONS, evolutionTier, totalLevels,
+  RUNES, CLASSES, CLASS_ORDER, CATEGORIES, upgradeCost, evolutionTier, totalLevels,
   fmt, BIOMES, CHAMPIONS, CAVE_LENGTH, biomeAt, REACTIONS,
 } from './data.js';
 
@@ -37,7 +37,7 @@ const timeStr = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStar
 export class UI {
   constructor(game) {
     this.game = game;
-    this.screens = ['title', 'draw', 'hud', 'results', 'shop'].map($);
+    this.screens = ['title', 'draw', 'hud', 'results', 'shop', 'classes'].map($);
     this.floats = [];
     this.floatFree = [];
     this.cache = {};
@@ -49,7 +49,8 @@ export class UI {
     $('btn-to-shop').addEventListener('click', () => g.toShop(true));
     $('btn-results').addEventListener('click', () => this.finishResults(true));
     $('results').addEventListener('pointerdown', e => { if (e.target.id !== 'btn-results') this.finishResults(false); });
-    $('btn-go').addEventListener('click', () => g.toDraw());
+    $('btn-go').addEventListener('click', () => g.goCave());
+    $('btn-classes-back').addEventListener('click', () => g.toShop(true));
     $('btn-mute').addEventListener('click', () => g.toggleMute());
     $('btn-menu').addEventListener('click', () => this.openMenu());
     $('btn-menu-close').addEventListener('click', () => { $('menu').hidden = true; g.sfx.click(); });
@@ -69,17 +70,20 @@ export class UI {
   // ------------------------------------------------------------ title
   setTitle(save) {
     $('btn-start').textContent = save.runs > 0 ? 'Continue' : 'Enter the cave';
+    const C = CLASSES[save.cur], mine = save.cls[save.cur];
     $('title-meta').textContent = save.runs > 0
-      ? `${EVOLUTIONS[evolutionTier(save)].name} · record ${Math.floor(save.bestDepth)} m · ${save.runs} run${save.runs === 1 ? '' : 's'}`
+      ? `${C.evolutions[evolutionTier(save)].name} \u00b7 record ${Math.floor(mine.bestDepth)} m \u00b7 ${save.runs} run${save.runs === 1 ? '' : 's'}`
       : 'Mouse or finger. One level. About forty minutes to the throne.';
   }
 
   // ------------------------------------------------------------ rune drawing
-  setupDraw({ index, count, chosen, unlocked, canShop, first }) {
-    $('draw-heading').textContent = count > 1 ? `Draw rune ${index + 1} of ${count}` : 'Draw your rune';
-    $('draw-sub').textContent = first ? 'Trace the triangle in one stroke to conjure Ember.'
-      : count > 1 && index > 0 ? 'Mix elements to set off reactions.'
-      : 'Clean lines hit harder. Quick strokes cast faster.';
+  setupDraw({ index, count, chosen, unlocked, canShop, first, cls }) {
+    const C = CLASSES[cls], word = C.word;
+    $('draw-heading').textContent = count > 1 ? `Draw ${word} ${index + 1} of ${count}` : `Draw your ${word}`;
+    $('draw-sub').textContent = first ? `Trace ${RUNES[C.starter].shape} in one stroke.`
+      : count > 1 && index > 0 ? 'Mix them to set off reactions.'
+      : 'Clean lines hit harder. Quick strokes strike faster.';
+    $('grimoire-label').firstChild.textContent = C.book + ' ';
     $('btn-to-shop').style.visibility = canShop ? 'visible' : 'hidden';
     if (index === 0) { const rr = $('rune-result'); rr.className = 'rune-result'; rr.textContent = ''; }   // no stale banner from last run
     const pips = $('draw-pips');
@@ -95,7 +99,7 @@ export class UI {
     const wrap = $('grimoire-cards');
     wrap.textContent = '';
     this.runeCards = {};
-    for (const id of RUNE_ORDER) {
+    for (const id of C.runes) {
       const R = RUNES[id], has = unlocked.includes(id);
       const b = document.createElement('button');
       b.type = 'button';
@@ -113,7 +117,7 @@ export class UI {
     el.style.setProperty('--rc', R.color);
     el.innerHTML = `<div class="rr-name">${R.name}</div><div class="rr-grade">${r.grade}</div>
       <div class="rr-stats"><span>Power <b>×${r.power.toFixed(2)}</b></span><span>Tempo <b>+${Math.round(r.haste * 100)}%</b> haste</span></div>
-      <div class="rr-msg">${r.grade === 'S' ? 'A flawless rune!' : r.grade === 'A' ? 'Strong lines.' : r.grade === 'B' ? 'It holds.' : 'Wobbly, but it will burn.'}</div>`;
+      <div class="rr-msg">${r.grade === 'S' ? 'Flawless!' : r.grade === 'A' ? 'Strong lines.' : r.grade === 'B' ? 'It holds.' : 'Wobbly, but it will do.'}</div>`;
     el.className = 'rune-result';
     void el.offsetWidth;
     el.className = 'rune-result show';
@@ -163,7 +167,7 @@ export class UI {
     $('depth-best').style.left = (Math.min(1, bestDepth / CAVE_LENGTH) * 100) + '%';
     $('depth-best').style.display = bestDepth > 1 ? '' : 'none';
     $('boss-bar').hidden = true;
-    $('combo').hidden = true;
+    $('boons').textContent = '';
     $('hp-lag').style.width = '100%';
     $('toasts').textContent = '';
     this.setGold(0);
@@ -183,16 +187,6 @@ export class UI {
     this.set('hpt', `${fmt(Math.max(0, Math.ceil(m.hp)))} / ${fmt(Math.ceil(m.maxHp))}`, v => { $('hp-text').textContent = v; });
     this.set('hasShield', m.maxShield > 0, v => { $('bar-shield').hidden = !v; });
     if (m.maxShield > 0) this.set('shield', Math.round(m.shield / m.maxShield * 100), v => { $('shield-fill').style.width = v + '%'; });
-    const combo = sim.combo;
-    this.set('comboOn', combo >= 3, v => { $('combo').hidden = !v; });
-    if (combo >= 3) {
-      this.set('combo', combo, v => {
-        $('combo-n').textContent = '×' + v;
-        const el = $('combo'); el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump');
-        el.style.transform = `scale(${Math.min(1.6, 1 + v * 0.008)})`;
-      });
-      $('combo-fill').style.width = Math.max(0, sim.comboT / 3 * 100) + '%';
-    }
     for (let i = 0; i < sim.slots.length; i++) {
       const s = sim.slots[i], el = this.slotEls[i];
       if (el) el.style.setProperty('--cd', Math.max(0, Math.min(1, s.cd / s.maxCd)).toFixed(2));
@@ -245,7 +239,7 @@ export class UI {
     panel.classList.toggle('win', sum.victory);
     $('res-eyebrow').textContent = `Run ${save.runs}`;
     $('res-title').textContent = sum.victory ? 'The Warlord falls' : sum.depth < 30 ? 'You perished' : sum.depth < 400 ? 'Overrun' : 'So very close';
-    $('res-meta').textContent = `${Math.floor(sum.depth)} m deep · ${timeStr(sum.time)} · best combo ×${sum.bestCombo}`;
+    $('res-meta').textContent = `${Math.floor(sum.depth)} m deep · ${timeStr(sum.time)}` + (sum.boons.length ? ` · ${sum.boons.length} boon${sum.boons.length > 1 ? 's' : ''}` : '');
     const rows = [
       [`Orcs slain <small>×${sum.kills}</small>`, sum.killGold, false],
       [`Depth bonus <small>${Math.floor(sum.depth)} m</small>`, sum.depthBonus, false],
@@ -304,16 +298,29 @@ export class UI {
 
   // ------------------------------------------------------------ shop
   buildShop(save) {
+    const cls = save.cur, C = CLASSES[cls];
+    // class tabs appear once there is more than one hero to spend on
+    const tabs = $('class-tabs');
+    tabs.textContent = '';
+    const owned = CLASS_ORDER.filter(id => save.cls[id].unlocked);
+    tabs.hidden = owned.length < 2;
+    for (const id of owned) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'tab' + (id === cls ? ' on' : ''); b.textContent = CLASSES[id].name;
+      b.addEventListener('click', () => this.game.switchClass(id));
+      tabs.appendChild(b);
+    }
     const scroll = $('shop-scroll');
     scroll.textContent = '';
+    scroll.scrollTop = 0;
     this.cards = {};
     for (const cat of CATEGORIES) {
       const h = document.createElement('h3');
-      h.className = 'shop-cat'; h.textContent = cat.name;
+      h.className = 'shop-cat'; h.textContent = typeof cat.name === 'string' ? cat.name : cat.name[cls];
       scroll.appendChild(h);
       const grid = document.createElement('div');
       grid.className = 'shop-grid';
-      for (const u of UPGRADES.filter(x => x.cat === cat.id)) {
+      for (const u of C.upgrades.filter(x => x.cat === cat.id)) {
         const b = document.createElement('button');
         b.type = 'button'; b.className = 'upg'; b.id = 'upg-' + u.id;
         b.style.setProperty('--ic', u.rune ? RUNES[u.rune].color : CAT_COLOR[u.cat]);
@@ -329,19 +336,20 @@ export class UI {
     this.refreshShop(save);
   }
   refreshShop(save) {
+    const cls = save.cur, C = CLASSES[cls], up = save.cls[cls].upgrades;
     $('shop-gold').textContent = fmt(save.gold);
-    for (const u of UPGRADES) {
+    for (const u of C.upgrades) {
       const c = this.cards[u.id];
       if (!c) continue;
-      const l = save.upgrades[u.id] || 0, maxed = l >= u.max, cost = maxed ? 0 : upgradeCost(u, l);
+      const l = up[u.id] || 0, maxed = l >= u.max, cost = maxed ? 0 : upgradeCost(u, l);
       c.lvl.textContent = u.max > 1 ? `${l} / ${u.max}` : '';
-      c.val.innerHTML = maxed ? u.value(l) : u.max === 1 ? '' : `${u.value(l)} <i>→ ${u.value(l + 1)}</i>`;
+      c.val.innerHTML = maxed ? u.value(l) : u.max === 1 ? '' : `${u.value(l)} <i>\u2192 ${u.value(l + 1)}</i>`;
       c.cost.innerHTML = maxed ? (u.max === 1 ? 'Owned' : 'Max') : `<i class="coin"></i>${fmt(cost)}`;
       c.el.classList.toggle('maxed', maxed);
       c.el.classList.toggle('afford', !maxed && save.gold >= cost);
     }
-    const tier = evolutionTier(save), n = totalLevels(save), evo = EVOLUTIONS[tier], next = EVOLUTIONS[tier + 1];
-    $('evo-step').textContent = `${tier + 1} / ${EVOLUTIONS.length}`;
+    const E = C.evolutions, tier = evolutionTier(save), n = totalLevels(save), evo = E[tier], next = E[tier + 1];
+    $('evo-step').textContent = `${tier + 1} / ${E.length}`;
     $('evo-name').textContent = evo.name;
     $('evo-blurb').textContent = evo.blurb;
     if (next) {
@@ -349,8 +357,53 @@ export class UI {
       const left = next.at - n;
       $('evo-next').textContent = `${left} more upgrade${left === 1 ? '' : 's'} to become ${/^[AEIOU]/.test(next.name) ? 'an' : 'a'} ${next.name}`;
     } else { $('evo-fill').style.width = '100%'; $('evo-next').textContent = 'Final form reached.'; }
-    const go = $('btn-go');
-    go.firstChild.textContent = save.runs === 0 ? 'Draw a rune ' : 'Back to the cave ';
+    $('btn-go').firstChild.textContent = save.runs === 0 ? `Draw a ${C.word} ` : 'Back to the cave ';
+  }
+
+  // ------------------------------------------------------------ class screen
+  showClasses(save) {
+    const wrap = $('class-cards');
+    wrap.textContent = '';
+    $('classes-gold').textContent = fmt(save.gold);
+    for (const id of CLASS_ORDER) {
+      const C = CLASSES[id], mine = save.cls[id], tier = evolutionTier(save, id);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.id = 'class-' + id;
+      b.className = 'ccard' + (mine.unlocked ? '' : ' locked') + (id === save.cur ? ' cur' : '');
+      b.style.setProperty('--rc', RUNES[C.starter].color);
+      const can = save.gold >= C.cost;
+      b.innerHTML = `<span class="cc-glyph">${glyphSvg(C.starter, 0.16)}</span>
+        <span class="cc-body"><b>${C.name}</b><i>${mine.unlocked ? C.evolutions[tier].name : 'Locked'}</i><span>${C.blurb}</span>
+        <small>${mine.unlocked ? (mine.runs ? `Record ${Math.floor(mine.bestDepth)} m \u00b7 ${mine.runs} run${mine.runs === 1 ? '' : 's'}` : 'Not yet played') : 'Own talents, own shop, own war marks.'}</small></span>
+        <span class="cc-go${mine.unlocked ? '' : can ? ' buy' : ' poor'}">${mine.unlocked ? 'Play' : `<i class="coin"></i>${fmt(C.cost)}`}</span>`;
+      b.addEventListener('click', () => this.game.pickClass(id));
+      wrap.appendChild(b);
+    }
+    this.show('classes');
+  }
+  classDenied(id) { const el = $('class-' + id); if (el) { el.classList.remove('nope'); void el.offsetWidth; el.classList.add('nope'); } }
+
+  // ------------------------------------------------------------ boons
+  showBoons(offer) {
+    const wrap = $('boon-cards');
+    wrap.textContent = '';
+    offer.forEach((b, i) => {
+      const el = document.createElement('button');
+      el.type = 'button'; el.className = 'bcard';
+      el.innerHTML = `<span class="upg-icon">${SVG_OPEN + ICONS[b.icon] + '</svg>'}</span><b>${b.name}</b><span>${b.desc}</span>`;
+      el.addEventListener('click', () => this.game.pickBoon(i));
+      wrap.appendChild(el);
+    });
+    $('boon').hidden = false;
+  }
+  hideBoons() { $('boon').hidden = true; }
+  addBoon(b) {
+    const el = document.createElement('span');
+    el.className = 'boon-chip';
+    el.innerHTML = SVG_OPEN + ICONS[b.icon] + '</svg>';
+    el.title = b.name;
+    $('boons').appendChild(el);
   }
   boughtFx(id, ok) {
     const c = this.cards[id];
@@ -371,10 +424,11 @@ export class UI {
       setTimeout(() => s.remove(), 620);
     }
   }
-  showEvolve(tier) {
-    const el = $('evolve'), evo = EVOLUTIONS[tier];
+  showEvolve(tier, cls) {
+    const el = $('evolve'), E = CLASSES[cls].evolutions, evo = E[tier];
+    $('evolve-eyebrow').textContent = `Your ${CLASSES[cls].name.toLowerCase()} has evolved`;
     $('evolve-name').textContent = evo.name;
-    $('evolve-bonus').textContent = `All spell damage ×${(evo.mult / EVOLUTIONS[tier - 1].mult).toFixed(2)} · tougher body`;
+    $('evolve-bonus').textContent = `All damage \u00d7${(evo.mult / E[tier - 1].mult).toFixed(2)} \u00b7 tougher body`;
     el.hidden = true; void el.offsetWidth; el.hidden = false;
     clearTimeout(this.evolveT);
     this.evolveT = setTimeout(() => { el.hidden = true; }, 3000);
@@ -382,7 +436,7 @@ export class UI {
   setMuted(m) { $('btn-mute').classList.toggle('off', m); }
   openMenu() {
     const s = this.game.save;
-    $('menu-stats').innerHTML = `Runs: <b>${s.runs}</b><br>Deepest: <b>${Math.floor(s.bestDepth)} m</b><br>Gold earned: <b>${fmt(s.totalGold)}</b><br>` +
+    $('menu-stats').innerHTML = `Runs: <b>${s.runs}</b><br>Deepest: <b>${Math.floor(Math.max(...CLASS_ORDER.map(c => s.cls[c].bestDepth)))} m</b><br>Gold earned: <b>${fmt(s.totalGold)}</b><br>` +
       `Warlord kills: <b>${s.victories}</b>${s.bestTime ? `<br>Fastest clear: <b>${timeStr(s.bestTime)}</b>` : ''}`;
     $('btn-reset').hidden = false; $('btn-reset-confirm').hidden = true;
     $('menu').hidden = false;
@@ -390,4 +444,4 @@ export class UI {
   }
   closeMenu() { $('menu').hidden = true; }
 }
-export { UPGRADE_BY_ID };
+

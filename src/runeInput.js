@@ -50,8 +50,8 @@ export class RuneInput {
     this.R = Math.max(70, Math.min(this.w * 0.44, availH * 0.48, 300));
   }
 
-  begin(unlocked, onStroke) {
-    this.unlocked = unlocked; this.onStroke = onStroke;
+  begin(unlocked, onStroke, pool = unlocked) {
+    this.unlocked = unlocked; this.onStroke = onStroke; this.pool = pool;
     this.active = true; this.drawing = false; this.points = []; this.anim = null;
     this.dirty = true;
   }
@@ -92,7 +92,7 @@ export class RuneInput {
     this.sfx.humStop();
     const pts = this.points;
     const dur = pts.length > 1 ? (pts[pts.length - 1][2] - pts[0][2]) / 1000 : 0;
-    const res = recognize(pts.map(p => [p[0], p[1]]), this.unlocked);
+    const res = recognize(pts.map(p => [p[0], p[1]]), this.unlocked, this.pool || this.unlocked);
     if (this.onStroke) this.onStroke(res, dur);
   }
 

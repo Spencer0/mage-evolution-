@@ -8,6 +8,8 @@ export const ELEMENT_COLOR = {
   fire: new THREE.Color(0xff6a1a), storm: new THREE.Color(0x8fcaff), frost: new THREE.Color(0x6fe8ff),
   arcane: new THREE.Color(0xb06cff), void: new THREE.Color(0xff3fc8), wisp: new THREE.Color(0xbfe8ff),
   phys: new THREE.Color(0xffd890),
+  steel: new THREE.Color(0xffd0c0), iron: new THREE.Color(0xffa040), earth: new THREE.Color(0xd09a48),
+  blood: new THREE.Color(0xff2a5a), spirit: new THREE.Color(0x8fdcff),
 };
 export const ORC_HEIGHT = { grunt: 1.25, whelp: 0.8, archer: 1.2, brute: 2.0, shaman: 1.25, loot: 1.15, champion: 2.5, boss: 3.7 };
 
@@ -143,6 +145,13 @@ export class Vfx {
       const m = new THREE.Mesh(sphGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
       scene.add(m); return { m };
     });
+    // sword arcs: one shared wedge, re-aimed and scaled per swing
+    const arcGeo = new THREE.RingGeometry(0.45, 1, 28, 1, Math.PI / 2 - 1.35, 2.7);
+    arcGeo.rotateX(-Math.PI / 2);
+    this.slashes = new Pool(() => {
+      const m = new THREE.Mesh(arcGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      scene.add(m); return { m };
+    });
     this.lights = [];
     for (let i = 0; i < 3; i++) { const l = new THREE.PointLight(0xffffff, 0, 30, 1.6); scene.add(l); this.lights.push({ l, t: 0, dur: 1, peak: 0 }); }
 
@@ -191,7 +200,7 @@ export class Vfx {
 
   /** Build one of everything pooled so the first fight does not hitch on shader compiles. */
   prewarm() {
-    for (const kind of ['fireball', 'lance', 'missile', 'wisp', 'hex', 'axe']) this.freeProj(this.makeProj(kind));
+    for (const kind of ['fireball', 'lance', 'missile', 'wisp', 'hex', 'axe', 'haxe']) this.freeProj(this.makeProj(kind));
     const c = ELEMENT_COLOR.fire;
     for (let i = 0; i < 6; i++) { this.ring(0, -50, 0, c, 1, 0.01); this.flash(0, -50, 0, c, 1, 0.01); }
     this.addZone({ id: -1, x: 0, d: 0, r: 1, t: 0, dur: 0.01, dead: true });
@@ -208,6 +217,7 @@ export class Vfx {
     this.bolts.length = 0; this.boltMesh.count = 0;
     while (this.rings.live.length) { this.rings.live[0].m.visible = false; this.rings.release(0); }
     while (this.flashes.live.length) { this.flashes.live[0].m.visible = false; this.flashes.release(0); }
+    while (this.slashes.live.length) { this.slashes.live[0].m.visible = false; this.slashes.release(0); }
     for (const [, v] of this.projLive) this.freeProj(v);
     this.projLive.clear();
     for (const [, z] of this.zones) { z.g.visible = false; this.zoneFree.push(z); }
@@ -240,6 +250,18 @@ export class Vfx {
     f.m.visible = true; f.m.position.set(x, y, z);
     f.m.material.color.copy(color).multiplyScalar(k);
     f.t = 0; f.dur = dur; f.radius = radius;
+  }
+  slash(x, z, ang, radius, color) {
+    const sl = this.slashes.get();
+    sl.m.visible = true; sl.m.position.set(x, 1.1, z);
+    sl.m.rotation.y = -ang; sl.ang = ang; sl.dir = Math.random() < 0.5 ? 1 : -1;
+    sl.m.material.color.copy(color).multiplyScalar(2.2);
+    sl.t = 0; sl.dur = 0.17; sl.radius = radius;
+    // sparks along the edge of the cut
+    for (let i = 0; i < 7; i++) {
+      const a = ang + rand(-1.2, 1.2), r = radius * rand(0.75, 1);
+      this.glow.emit(x + Math.sin(a) * r, rand(0.7, 1.6), z - Math.cos(a) * r, Math.sin(a) * 6, rand(0, 3), -Math.cos(a) * 6, color.r * 1.8, color.g * 1.8, color.b * 1.8, rand(0.22, 0.4), 0.22, 6, 3, 0);
+    }
   }
   light(x, y, z, color, peak, dur = 0.35) {
     let best = this.lights[0];
@@ -309,6 +331,30 @@ export class Vfx {
       this.light(x, 3, z, c, 1500, 0.8);
       W.shake(1.1);
       W.flash(0xffc060, 0.6);
+    } else if (kind === 'quake') {
+      const c = ELEMENT_COLOR.earth;
+      this.ring(x, 0.12, z, c, r, 0.34, 2.4);
+      this.ring(x, 0.14, z, _c.setRGB(1, 0.85, 0.5), r * 0.6, 0.24, 2);
+      this.burst(x, 0.3, z, _c.setRGB(0.3, 0.25, 0.2), 14, 6, 1.3, 0.6, { smoke: true, up: 0.7, boost: 1, end: 1.6 });
+      this.burst(x, 0.4, z, c, 22, 9, 0.36, 0.5, { up: 0.6, grav: 16, drag: 0.6 });
+      this.spawnDebris(x, 0.3, z, _c.setRGB(0.28, 0.24, 0.2), 9, 6);
+      this.light(x, 1.4, z, c, 380, 0.3);
+      W.shake(0.42);
+    } else if (kind === 'judge') {
+      const c = ELEMENT_COLOR.spirit;
+      this.flash(x, 1.6, z, _c.setRGB(0.8, 0.95, 1), r * 0.85, 0.28, 3.6);
+      this.ring(x, 0.13, z, c, r * 1.2, 0.45, 3);
+      this.burst(x, 1.2, z, c, 46, 13, 0.7, 0.55, { up: 0.5, drag: 3 });
+      this.burst(x, 3, z, _c.setRGB(0.9, 0.97, 1), 16, 4, 0.3, 0.8, { up: 1.5, drag: 1 });
+      this.light(x, 2.4, z, c, 800, 0.45);
+      W.shake(0.6);
+    } else if (kind === 'rupture') {
+      const c = _c.setRGB(1, 0.2, 0.15).clone();
+      this.flash(x, 1.1, z, c, r * 0.7, 0.18, 3);
+      this.ring(x, 0.14, z, c, r, 0.28, 2.4);
+      this.burst(x, 1.1, z, c, 26, 10, 0.45, 0.4, { grav: 10, drag: 2 });
+      this.light(x, 1.5, z, c, 420, 0.26);
+      W.shake(0.34);
     } else if (kind === 'void') {
       const c = ELEMENT_COLOR.void;
       this.flash(x, 1.3, z, c, r * 0.9, 0.3, 3.5);
@@ -333,7 +379,7 @@ export class Vfx {
     this.burst(x, h, z, c, Math.round(14 * big), 7 * Math.sqrt(big), 0.6 * Math.sqrt(big), 0.45, { up: 0.4, drag: 3 });
     this.burst(x, h, z, _c.setRGB(0.55, 0.95, 0.3), Math.round(8 * big), 4.5, 0.42, 0.5, { up: 0.5, grav: 12, drag: 1 });
     // a little soul wisp
-    this.glow.emit(x, h + 0.3, z, rand(-0.3, 0.3), 3.2, rand(-0.3, 0.3), 0.75, 1.3, 0.9, 1.1 * Math.sqrt(big), 0.8, -1, 1, 0.2);
+    this.glow.emit(x, h + 0.3, z, rand(-0.3, 0.3), 3.2, rand(-0.3, 0.3), 0.6, 1.1, 0.75, 0.55 * Math.sqrt(big), 0.6, -1, 1, 0.2);
     this.spawnDebris(x, h, z, _c.setRGB(0.2, 0.4, 0.12), Math.round(5 * big), 3.2, dirX * 0.8, dirZ * 0.8);
     this.spawnDebris(x, h, z, _c.setRGB(0.3, 0.26, 0.22), Math.round(2 * big), 3.2, dirX * 0.8, dirZ * 0.8);
     if (element === 'frost') this.spawnDebris(x, h, z, _c.setRGB(0.6, 0.95, 1.2), 7, 4.5, dirX, dirZ);
@@ -358,6 +404,11 @@ export class Vfx {
     else if (kind === 'lance') { m = withGlow(mk(this.projGeo.lance, 0x9ff4ff, 2.8), 0x5fe6ff, 3.2); m.scale.set(0.2, 0.2, 1.25); }
     else if (kind === 'missile') { m = withGlow(mk(this.projGeo.orb, 0xc58bff, 3.2), 0xb06cff, 6.5); m.scale.setScalar(0.19); }
     else if (kind === 'wisp') { m = withGlow(mk(this.projGeo.orb, 0xdff4ff, 3.2), 0x9fd8ff, 6); m.scale.setScalar(0.12); }
+    else if (kind === 'haxe') {
+      m = withGlow(new THREE.Mesh(this.projGeo.shaft, new THREE.MeshStandardMaterial({ color: 0x8a6a48, emissive: 0x4a2a10 })), 0xffa040, 3.4);
+      const blade = new THREE.Mesh(this.projGeo.blade, new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffc070).multiplyScalar(2.4) }));
+      blade.position.set(0, 0.3, 0.14); m.add(blade); m.scale.setScalar(1.5);
+    }
     else if (kind === 'hex') { m = withGlow(mk(this.projGeo.orb, 0xb040ff, 2.6), 0x9a30e0, 7); m.scale.setScalar(0.24); }
     else {   // a thrown axe, tumbling end over end
       m = new THREE.Mesh(this.projGeo.shaft, new THREE.MeshStandardMaterial({ color: 0x8a6a48, emissive: 0x3a2410 }));
@@ -395,7 +446,8 @@ export class Vfx {
       const targetY = p.hostile ? 1.5 + Math.sin(Math.min(1, v.age * 1.6) * Math.PI) * 1.1 : p.kind === 'fireball' ? 1.25 + Math.sin(clamp(v.age * 2.2) * Math.PI) * 0.5 : 1.2;
       m.position.y = damp(m.position.y, targetY, 7, dt);
       const dx = m.position.x - v.px, dy = m.position.y - v.py, dz = m.position.z - v.pz;
-      if (p.kind === 'axe') { m.rotation.x -= dt * 22; m.rotation.y = Math.atan2(dx, dz); if (Math.random() < dt * 30) this.glow.emit(m.position.x, m.position.y, m.position.z, 0, 0, 0, 0.9, 0.9, 1.0, 0.22, 0.16, 0, 0, 0); }
+      if (p.kind === 'haxe') { m.rotation.x += dt * 26; m.rotation.y = Math.atan2(dx, dz); for (let i = 0; i < 2; i++) this.glow.emit(m.position.x - dx * i * 0.5, m.position.y, m.position.z - dz * i * 0.5, 0, 0, 0, 1.9, 1.0, 0.35, 0.34, 0.2, 0, 0, 0); }
+      else if (p.kind === 'axe') { m.rotation.x -= dt * 22; m.rotation.y = Math.atan2(dx, dz); if (Math.random() < dt * 30) this.glow.emit(m.position.x, m.position.y, m.position.z, 0, 0, 0, 0.9, 0.9, 1.0, 0.22, 0.16, 0, 0, 0); }
       else if (p.kind === 'lance') {
         if (dx * dx + dz * dz > 1e-6) { _v.set(m.position.x + dx, m.position.y + dy, m.position.z + dz); m.lookAt(_v); }
       } else { m.rotation.x += dt * 9; m.rotation.y += dt * 7; }
@@ -419,7 +471,8 @@ export class Vfx {
     const v = this.projLive.get(p.id);
     const x = v ? v.m.position.x : p.x, y = v ? v.m.position.y : 1.3, z = v ? v.m.position.z : -p.d;
     if (v) { this.projLive.delete(p.id); this.freeProj(v); }
-    if (p.kind === 'lance') { this.burst(x, y, z, ELEMENT_COLOR.frost, 12, 6, 0.4, 0.4, { grav: 8, drag: 1 }); }
+    if (p.kind === 'haxe') this.burst(x, y, z, ELEMENT_COLOR.iron, 10, 6, 0.36, 0.3, { grav: 10, drag: 2 });
+    else if (p.kind === 'lance') { this.burst(x, y, z, ELEMENT_COLOR.frost, 12, 6, 0.4, 0.4, { grav: 8, drag: 1 }); }
     else if (p.kind === 'missile') { this.burst(x, y, z, ELEMENT_COLOR.arcane, 10, 5, 0.45, 0.3, { drag: 4 }); this.flash(x, y, z, ELEMENT_COLOR.arcane, 0.8, 0.14, 2); }
     else if (p.kind === 'wisp') this.burst(x, y, z, ELEMENT_COLOR.wisp, 5, 4, 0.3, 0.22, { drag: 4 });
     else if (p.kind === 'hex' && hit) this.burst(x, y, z, _c.setRGB(0.7, 0.25, 1), 12, 5, 0.5, 0.35, { drag: 3 });
@@ -471,7 +524,7 @@ export class Vfx {
     this.zones.set(z.id, v);
     this.ring(z.x, 0.12, -z.d, ELEMENT_COLOR.void, z.r, 0.5, 2);
   }
-  addMeteor(x, z, delay, r) {
+  addMeteor(x, z, delay, r, spirit) {
     let m = this.meteors.find(o => o.done);
     if (!m) {
       const mesh = new THREE.Mesh(this.projGeo.orb, new THREE.MeshBasicMaterial({ color: new THREE.Color(0xff9a3a).multiplyScalar(3.5) }));
@@ -481,8 +534,12 @@ export class Vfx {
       this.scene.add(mesh, ring);
       m = { mesh, ring }; this.meteors.push(m);
     }
-    m.done = false; m.t = 0; m.delay = delay; m.x = x; m.z = z; m.r = r;
-    m.mesh.visible = true; m.ring.visible = true; m.mesh.scale.setScalar(0.85);
+    m.done = false; m.t = 0; m.delay = delay; m.x = x; m.z = z; m.r = r; m.spirit = !!spirit;
+    m.mesh.material.color.set(spirit ? 0xbfeaff : 0xff9a3a).multiplyScalar(3.5);
+    m.mesh.children[0].material.color.set(spirit ? 0x8fdcff : 0xff6a1a);
+    m.ring.material.color.set(spirit ? 0x8fdcff : 0xff5a1a).multiplyScalar(2);
+    m.mesh.scale.set(spirit ? 0.3 : 0.85, spirit ? 3.2 : 0.85, spirit ? 0.3 : 0.85);
+    m.mesh.visible = true; m.ring.visible = true;
     m.ring.position.set(x, 0.1, z);
   }
   telegraph(x, z, r, delay, color) { const rr = this.ring(x, 0.1, z, color, r, delay, 1.6); rr.shrink = true; }
@@ -500,9 +557,23 @@ export class Vfx {
       }
       case 'hit': if (!ev.dot) this.hitSpark(ev.x, 1.1 + ev.r * 0.6, -ev.d, ev.element, ev.crit); break;
       case 'zone': this.addZone(ev.z); break;
-      case 'meteor': this.addMeteor(ev.x, -ev.d, ev.delay, ev.r); break;
+      case 'meteor': this.addMeteor(ev.x, -ev.d, ev.delay, ev.r, ev.spirit); break;
+      case 'slash': this.slash(ev.x, -ev.d, ev.ang, ev.r, ELEMENT_COLOR.steel); break;
+      case 'whirl': {
+        const c = ELEMENT_COLOR.blood;
+        this.ring(ev.x, 1.0, -ev.d, c, ev.r, 0.2, 1.5);
+        for (let i = 0; i < 5; i++) { const a = Math.random() * 6.283; this.glow.emit(ev.x + Math.cos(a) * ev.r * 0.9, rand(0.6, 1.6), -ev.d + Math.sin(a) * ev.r * 0.9, -Math.sin(a) * 9, 0.5, Math.cos(a) * 9, 1.9, 0.35, 0.5, 0.36, 0.2, 0, 2, 0); }
+        break;
+      }
+      case 'boonTaken': {
+        const p = this.magePos, c = _c.setRGB(1, 0.85, 0.4).clone();
+        for (let i = 0; i < 3; i++) this.ring(p.x, 0.1 + i * 0.03, p.z, c, 3 + i * 2, 0.5 + i * 0.2, 2.4);
+        this.burst(p.x, 1.6, p.z, c, 70, 8, 0.6, 1.1, { up: 0.7, drag: 1.5 });
+        this.light(p.x, 2.5, p.z, c, 700, 0.7);
+        break;
+      }
       case 'react': {
-        const c = ev.name === 'thermal' ? _c.setRGB(1, 0.7, 0.3) : ev.name === 'overload' ? _c.setRGB(1, 0.95, 0.5) : _c.setRGB(0.6, 0.95, 1);
+        const c = ev.name === 'thermal' ? _c.setRGB(1, 0.7, 0.3) : ev.name === 'overload' ? _c.setRGB(1, 0.95, 0.5) : ev.name === 'execute' || ev.name === 'rupture' ? _c.setRGB(1, 0.25, 0.2) : ev.name === 'petrify' ? _c.setRGB(0.85, 0.7, 0.45) : _c.setRGB(0.6, 0.95, 1);
         this.ring(ev.x, 0.14, -ev.d, c.clone(), 2, 0.3, 2.4);
         this.burst(ev.x, 1.3, -ev.d, c, 16, 8, 0.45, 0.4, { drag: 3 });
         break;
@@ -557,8 +628,10 @@ export class Vfx {
       // status dressing on orcs
       for (const e of sim.enemies) {
         const h = ORC_HEIGHT[e.type] || 1.2, z = -e.d;
-        if (e.burnT > 0 && Math.random() < dt * 22) this.glow.emit(e.x + rand(-e.r, e.r) * 0.7, rand(0.3, h + 0.5), z + rand(-e.r, e.r) * 0.7, 0, rand(1.5, 3), 0, 1.9, 0.65 + Math.random() * 0.4, 0.12, rand(0.4, 0.8), 0.4, 0, 1, 0);
-        if (e.chillT > 0 && Math.random() < dt * 9) this.glow.emit(e.x + rand(-e.r, e.r), rand(0.3, h + 0.4), z + rand(-e.r, e.r), 0, -0.6, 0, 0.7, 1.4, 1.7, 0.24, 0.6, 0, 0, 0.3);
+        if (e.burnT > 0 && e.bleed) { if (Math.random() < dt * 16) this.glow.emit(e.x + rand(-e.r, e.r) * 0.6, rand(0.5, h), z + rand(-e.r, e.r) * 0.6, rand(-1, 1), rand(0.5, 2), rand(-1, 1), 1.7, 0.08, 0.1, rand(0.16, 0.28), 0.5, 12, 0.5, 0.5); }
+        else if (e.burnT > 0 && Math.random() < dt * 22) this.glow.emit(e.x + rand(-e.r, e.r) * 0.7, rand(0.3, h + 0.5), z + rand(-e.r, e.r) * 0.7, 0, rand(1.5, 3), 0, 1.9, 0.65 + Math.random() * 0.4, 0.12, rand(0.4, 0.8), 0.4, 0, 1, 0);
+        if (e.chillT > 0 && e.daze) { if (Math.random() < dt * 10) { const a = this.t * 6 + e.id; this.glow.emit(e.x + Math.cos(a) * 0.5, h + 0.75, z + Math.sin(a) * 0.5, 0, 0.2, 0, 1.9, 1.6, 0.4, 0.2, 0.3, 0, 0, 0.4); } }
+        else if (e.chillT > 0 && Math.random() < dt * 9) this.glow.emit(e.x + rand(-e.r, e.r), rand(0.3, h + 0.4), z + rand(-e.r, e.r), 0, -0.6, 0, 0.7, 1.4, 1.7, 0.24, 0.6, 0, 0, 0.3);
         if (e.shockT > 0 && Math.random() < dt * 12) this.glow.emit(e.x + rand(-e.r, e.r), rand(0.4, h + 0.4), z + rand(-e.r, e.r), rand(-3, 3), rand(-1, 3), rand(-3, 3), 1.1, 1.5, 2.0, 0.26, 0.14, 0, 0, 0);
         if (e.type === 'loot' && Math.random() < dt * 14) this.glow.emit(e.x + rand(-0.4, 0.4), rand(1.2, 2.2), z + rand(-0.4, 0.4), 0, 0.6, 0, 1.9, 1.4, 0.3, 0.3, 0.5, 0, 0, 0);
         if (e.type === 'boss' && e.enraged && Math.random() < dt * 30) this.glow.emit(e.x + rand(-1.5, 1.5), rand(0.5, 5.5), z + rand(-1.2, 1.2), 0, rand(1, 3), 0, 2, 0.25, 0.2, rand(0.5, 1), 0.5, 0, 1, 0);
@@ -664,6 +737,15 @@ export class Vfx {
       f.m.scale.setScalar(f.radius * (0.3 + 0.7 * (1 - (1 - k) * (1 - k))));
       f.m.material.opacity = (1 - k) * (1 - k);
     }
+    for (let i = this.slashes.live.length - 1; i >= 0; i--) {
+      const sl = this.slashes.live[i];
+      sl.t += dt;
+      const k = sl.t / sl.dur;
+      if (k >= 1) { sl.m.visible = false; this.slashes.release(i); continue; }
+      sl.m.scale.setScalar(sl.radius * (0.75 + k * 0.3));
+      sl.m.rotation.y = -sl.ang + sl.dir * (k - 0.5) * 0.9;
+      sl.m.material.opacity = (1 - k) * 0.9;
+    }
     for (const l of this.lights) {
       if (l.t > 0) { l.t -= dt; const k = Math.max(0, l.t / l.dur); l.l.intensity = l.peak * k * k; } else l.l.intensity = 0;
     }
@@ -690,10 +772,11 @@ export class Vfx {
       const k = clamp(m.t / m.delay);
       if (k >= 1) { m.done = true; m.mesh.visible = false; m.ring.visible = false; continue; }
       const e = k * k;
-      m.mesh.position.set(m.x + (1 - e) * 9, 0.8 + (1 - e) * 30, m.z - (1 - e) * 5);
+      if (m.spirit) m.mesh.position.set(m.x, 1.6 + (1 - e) * 26, m.z);
+      else m.mesh.position.set(m.x + (1 - e) * 9, 0.8 + (1 - e) * 30, m.z - (1 - e) * 5);
       m.ring.scale.setScalar(m.r * (1.2 - k * 0.2));
       m.ring.material.opacity = 0.3 + k * 0.7;
-      for (let i = 0; i < 4; i++) this.glow.emit(m.mesh.position.x + rand(-0.4, 0.4), m.mesh.position.y + rand(-0.4, 0.4), m.mesh.position.z + rand(-0.4, 0.4), rand(-1, 1), rand(0, 2), rand(-1, 1), 2, 0.7 + Math.random() * 0.5, 0.15, rand(0.9, 1.6), rand(0.3, 0.55), 0, 1, 0);
+      for (let i = 0; i < 4; i++) this.glow.emit(m.mesh.position.x + rand(-0.4, 0.4), m.mesh.position.y + rand(-0.4, 0.4) + (m.spirit ? rand(0, 3) : 0), m.mesh.position.z + rand(-0.4, 0.4), rand(-1, 1), rand(0, 2), rand(-1, 1), m.spirit ? 0.9 : 2, m.spirit ? 1.5 : 0.7 + Math.random() * 0.5, m.spirit ? 2 : 0.15, rand(0.9, 1.6), rand(0.3, 0.55), 0, 1, 0);
     }
 
     // mage attachments

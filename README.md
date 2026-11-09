@@ -22,13 +22,27 @@ http(s) because it uses ES modules.
 
 ## How it plays
 
+**Mage** (the starting hero)
+
 | Rune | Shape | Spell | Why you would pick it |
 | --- | --- | --- | --- |
-| Ember | triangle | Fireball | Splash damage and burning. The starter. |
+| Ember | a peak (upside-down V) | Fireball | Splash damage and burning. The starter. |
 | Storm | zigzag | Chain Lightning | Fast, chains through packs, shocked orcs take +20% damage. |
 | Frost | hourglass | Ice Lance | Pierces a line and slows everything it touches. |
 | Arcane | circle | Seeker Missiles | Marked orcs drop +60% gold. The farming rune. |
 | Void | five-point star | Singularity | Drags a pack together and crushes it. Hardest to draw. |
+
+**Warrior** (50,000 gold; the hero screen appears before each run once you have two runs)
+
+| War mark | Shape | Attack | Why you would pick it |
+| --- | --- | --- | --- |
+| Cleave | V | Sword arcs | Hits everything in front and leaves it bleeding. The starter. |
+| Hurl | arrowhead pointing right | Thrown axes | His ranged option; punches through a line. |
+| Quake | double peak (M) | Ground slam | Dazes and briefly stuns everything around him. |
+| Whirl | spiral | Whirlwind | Constant damage all round, and it heals. |
+| Judgement | crown | Sky blade | A spectral greatsword on the thickest pack. Hardest to draw. |
+
+Each hero has their own shop, talents and six evolutions. Gold is shared.
 
 - **It is a sprint, not a stand-off.** The mage never stops for fodder. Goblins die in one
   hit and come in tides; each one that latches on slows the sprint a little. Axe throwers
@@ -39,21 +53,22 @@ http(s) because it uses ES modules.
 - **Extra Sigils** let you draw two, then three runes per run. Mixing elements sets off
   reactions: fire on a chilled orc is a *Thermal Shock* (double damage), lightning on a
   burning orc is an *Overload* (explosion), frost on a shocked orc is a *Deep Freeze*.
-- **Combos** raise gold per kill, so killing quickly pays better than killing slowly.
+- **Champions** guard every 200 m. Each one slain stops the run for a moment and offers two
+  boons; the one you take lasts until the run ends.
 - Frost has a second use: chilled orcs cannot keep up, so the mage shakes them off.
 - Perks include orbiting wisps, a recharging mana barrier, meteor strikes, corpse
   explosions, spell echoes and a phoenix revive.
-- The cave has five zones, three champions and a boss. The mage has six evolutions.
+- The cave has five zones, five champions and a boss.
 
 ## Code map
 
 | File | What it is |
 | --- | --- |
-| `src/data.js` | Runes, enemies, upgrades, evolutions and every balance number. |
+| `src/data.js` | Classes, runes, enemies, upgrades, boons, evolutions and every balance number. |
 | `src/sim.js` | The whole run as a headless simulation that emits events. |
 | `src/recognizer.js` | The one-stroke rune recogniser. |
 | `src/world.js` | Renderer, bloom and grading, camera rig, procedural cave. |
-| `src/actors.js` | The mage (six tiers) and the orcs, built from primitives. |
+| `src/actors.js` | The mage and warrior (six tiers each) and the orcs, built from primitives. |
 | `src/vfx.js` | Particles, projectiles, lightning, coins, debris, explosions. |
 | `src/audio.js` | All sound, synthesised with WebAudio. |
 | `src/ui.js`, `src/runeInput.js`, `src/main.js` | HUD and shop, the rune circle, game flow. |
@@ -65,12 +80,14 @@ seconds:
 
 ```bash
 npm run balance            # a bot drawing B/A-grade runes
-node tools/balance.mjs 1   # a bot that draws perfect runes
+node tools/balance.mjs 1                 # a bot that draws perfect runes
 node tools/balance.mjs 0.45 3 --verbose
+node tools/balance.mjs 0.8 1 warrior     # quality, seed, class
 ```
 
 It prints every run's length, depth, kills and income until the Warlord dies. With the
-current numbers that takes 20 to 28 runs depending on how well the runes are drawn.
+current numbers that takes about 19 to 26 runs for either hero, depending on how well the
+runes are drawn.
 
 ## Debugging
 

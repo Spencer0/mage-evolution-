@@ -41,7 +41,7 @@
       </header>
       <div id="rune-result" class="rune-result" aria-live="polite"></div>
       <footer class="grimoire">
-        <p class="grimoire-label">Your grimoire <span>tap a rune to see how it is drawn</span></p>
+        <p class="grimoire-label" id="grimoire-label">Your grimoire <span>tap one to see how it is drawn</span></p>
         <div id="grimoire-cards" class="grimoire-cards"></div>
       </footer>
     </section>
@@ -64,10 +64,10 @@
         <span id="boss-name">Champion</span>
         <div class="boss-track"><div id="boss-fill"></div></div>
       </div>
-      <div class="combo" id="combo" hidden><b id="combo-n">x2</b><span>combo</span><div class="combo-bar"><div id="combo-fill"></div></div></div>
       <div class="banner" id="banner"><h3 id="banner-title"></h3><p id="banner-sub"></p></div>
       <div class="hud-bottom">
         <div class="vitals">
+          <div class="boons" id="boons" aria-label="Boons this run"></div>
           <div class="bar bar-shield" id="bar-shield" hidden><div id="shield-fill"></div></div>
           <div class="bar bar-hp" id="bar-hp"><div id="hp-lag"></div><div id="hp-fill"></div><span id="hp-text"></span></div>
         </div>
@@ -97,6 +97,7 @@
           <button id="btn-mute" class="btn btn-ghost btn-icon" type="button" aria-label="Toggle sound"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.500v5h3.500L12 18.500v-13L7.500 9.500zM15.500 9a4 4 0 0 1 0 6M18 6.500a7.500 7.500 0 0 1 0 11"/></svg></button>
           <button id="btn-menu" class="btn btn-ghost btn-icon" type="button" aria-label="Options"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.800"/><circle cx="12" cy="12" r="1.800"/><circle cx="19" cy="12" r="1.800"/></svg></button>
         </div>
+        <div class="tabs" id="class-tabs" hidden></div>
         <div class="evo" id="evo">
           <p class="eyebrow">Evolution <span id="evo-step">1 / 6</span></p>
           <h2 id="evo-name">Apprentice</h2>
@@ -111,9 +112,27 @@
       </div>
     </section>
 
+    <!-- ============ class choice ============ -->
+    <section id="classes" class="screen">
+      <header class="draw-head">
+        <button id="btn-classes-back" class="btn btn-ghost btn-small" type="button"><i class="chev left"></i>Shop</button>
+        <div class="draw-title"><h2>Choose your hero</h2><p>Each hero keeps their own talents. Gold is shared.</p></div>
+        <div class="purse purse-small"><i class="coin"></i><b id="classes-gold">0</b></div>
+      </header>
+      <div class="class-cards" id="class-cards"></div>
+    </section>
+
     <!-- ============ overlays ============ -->
+    <div id="boon" class="modal boon" hidden>
+      <div class="boon-inner">
+        <p class="eyebrow">Champion slain</p>
+        <h2>Claim a boon</h2>
+        <p class="boon-sub">It lasts until this run ends.</p>
+        <div class="boon-cards" id="boon-cards"></div>
+      </div>
+    </div>
     <div id="evolve" class="evolve" hidden>
-      <p class="eyebrow">Your mage has evolved</p>
+      <p class="eyebrow" id="evolve-eyebrow">Your mage has evolved</p>
       <h2 id="evolve-name">Adept</h2>
       <p id="evolve-bonus"></p>
     </div>
