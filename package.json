@@ -1,0 +1,11 @@
+{
+  "name": "mage-evolution",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Draw a rune, slay orcs, evolve your mage. A three.js incremental.",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "balance": "node tools/balance.mjs"
+  }
+}
