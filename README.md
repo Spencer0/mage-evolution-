@@ -16,9 +16,14 @@ in code.
 npm start          # serves the folder at http://localhost:5173
 ```
 
-Any static host works (GitHub Pages included): the game is `index.html`, `style.css`,
-`src/` and a vendored copy of three.js in `vendor/`. It only needs to be served over
-http(s) because it uses ES modules.
+Any static host works: the game is `index.html`, `style.css`, `src/` and a vendored copy
+of three.js in `vendor/`. It only needs to be served over http(s) because it uses ES modules.
+
+### GitHub Pages
+
+`.github/workflows/pages.yml` publishes the game every time `main` changes. It needs one
+setting, once: repository **Settings -> Pages -> Source: GitHub Actions**. The site then
+lives at `https://<owner>.github.io/<repo>/`.
 
 ## How it plays
 
