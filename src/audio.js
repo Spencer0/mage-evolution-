@@ -125,6 +125,14 @@ export class Sfx {
     else if (rune === 'quake') { this.tone({ f0: 90, f1: 34, dur: 0.4, gain: 0.26 }); this.noise({ f0: 700, f1: 80, dur: 0.35, gain: 0.16 }); }
     else if (rune === 'whirl') { this.noise({ f0: 500, f1: 1800, dur: 0.16, gain: 0.05, type: 'bandpass', q: 2 }); }
     else if (rune === 'crown') { this.tone({ type: 'triangle', f0: 1320, f1: 660, dur: 0.4, gain: 0.08, echo: 0.6 }); this.noise({ f0: 4000, f1: 600, dur: 0.38, gain: 0.06, attack: 0.25 }); }
+    else if (rune === 'longshot') { this.noise({ f0: 3000, f1: 300, dur: 0.22, gain: 0.2, echo: 0.5 }); this.tone({ f0: 180, f1: 60, dur: 0.14, gain: 0.14 }); }
+    else if (rune === 'drone') { this.tone({ type: 'square', f0: 1300, f1: 700, dur: 0.035, gain: 0.025 }); }
+    else if (rune === 'bomb') { this.noise({ f0: 500, f1: 1400, dur: 0.14, gain: 0.06, type: 'bandpass', q: 2 }); }
+    else if (rune === 'orbital') { this.tone({ type: 'sawtooth', f0: 1800, f1: 220, dur: 0.6, gain: 0.08, echo: 0.5 }); }
+    else if (rune === 'mend') { this.tone({ type: 'sine', f0: 660, f1: 990, dur: 0.22, gain: 0.05, echo: 0.6 }); }
+    else if (rune === 'toxin') { this.noise({ f0: 4000, dur: 0.05, gain: 0.035, type: 'highpass' }); }
+    else if (rune === 'adrenaline') { [0, 5, 12].forEach((n, i) => this.tone({ type: 'square', f0: 440 * Math.pow(2, n / 12), dur: 0.1, gain: 0.04, when: i * 0.05, echo: 0.3 })); }
+    else if (rune === 'defib') { this.tone({ type: 'sawtooth', f0: 300, f1: 1800, dur: 0.18, gain: 0.07 }); this.noise({ f0: 3000, dur: 0.16, gain: 0.12, type: 'highpass', when: 0.16 }); }
     else if (rune === 'void') { this.tone({ f0: 160, f1: 38, dur: 0.9, gain: 0.2 }); this.noise({ f0: 200, f1: 2400, dur: 0.8, gain: 0.07, attack: 0.5 }); }
   }
   explode(kind) {

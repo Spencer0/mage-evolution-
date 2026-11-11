@@ -42,6 +42,7 @@
       <div id="rune-result" class="rune-result" aria-live="polite"></div>
       <footer class="grimoire">
         <p class="grimoire-label" id="grimoire-label">Your grimoire <span>tap one to see how it is drawn</span></p>
+        <button id="btn-repeat" class="btn btn-ghost repeat" type="button" hidden>Same as last run</button>
         <div id="grimoire-cards" class="grimoire-cards"></div>
       </footer>
     </section>
@@ -68,7 +69,7 @@
       <div class="banner" id="banner"><h3 id="banner-title"></h3><p id="banner-sub"></p></div>
       <div class="hud-bottom">
         <div class="vitals">
-          <div class="boons" id="boons" aria-label="Boons this run"></div>
+          <div class="boons" id="boons" aria-label="Gear found this run"></div>
           <div class="hero-bars" id="hero-bars"></div>
         </div>
         <div class="slots" id="slots"></div>
@@ -127,8 +128,8 @@
     <div id="boon" class="modal boon" hidden>
       <div class="boon-inner">
         <p class="eyebrow">Champion slain</p>
-        <h2>Claim a boon</h2>
-        <p class="boon-sub">It lasts until this run ends.</p>
+        <h2>Take your spoils</h2>
+        <p class="boon-sub">One hero wears it until this run ends.</p>
         <div class="boon-cards" id="boon-cards"></div>
       </div>
     </div>
