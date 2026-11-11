@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0a0d18">
+<title>Mage Evolution</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alegreya+Sans:wght@400;500;700;800&family=Cinzel:wght@600;800;900&display=swap">
+<link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<!--GAME-->
+<div id="game">
+  <canvas id="scene" aria-label="The cave"></canvas>
+  <canvas id="rune-canvas" aria-label="Rune drawing surface"></canvas>
+
+  <div id="ui">
+    <!-- ============ title ============ -->
+    <section id="title" class="screen">
+      <div class="title-block">
+        <p class="eyebrow">A rune-drawing dungeon dash</p>
+        <h1 class="logo"><span>Mage</span><span>Evolution</span></h1>
+        <p class="tagline">Draw a rune. Slay the horde. Spend the spoils. Go deeper.</p>
+        <button id="btn-start" class="btn btn-gold btn-big" type="button">Enter the cave</button>
+        <p class="title-meta" id="title-meta"></p>
+      </div>
+    </section>
+
+    <!-- ============ rune drawing ============ -->
+    <section id="draw" class="screen">
+      <header class="draw-head">
+        <button id="btn-to-shop" class="btn btn-ghost btn-small" type="button"><i class="chev left"></i>Shop</button>
+        <div class="draw-title">
+          <h2 id="draw-heading">Draw your rune</h2>
+          <p id="draw-sub">Clean lines hit harder. Quick strokes cast faster.</p>
+          <div id="draw-pips" class="pips"></div>
+        </div>
+        <span class="draw-spacer"></span>
+      </header>
+      <div id="rune-result" class="rune-result" aria-live="polite"></div>
+      <footer class="grimoire">
+        <p class="grimoire-label" id="grimoire-label">Your grimoire <span>tap one to see how it is drawn</span></p>
+        <div id="grimoire-cards" class="grimoire-cards"></div>
+      </footer>
+    </section>
+
+    <!-- ============ run HUD ============ -->
+    <section id="hud" class="screen">
+      <div class="hud-top">
+        <div class="hud-gold" id="hud-gold"><i class="coin"></i><b id="hud-gold-n">0</b></div>
+        <div class="depth">
+          <div class="depth-labels"><span id="hud-zone">The Maw</span><span><b id="hud-depth">0</b> m</span></div>
+          <div class="depth-track" id="depth-track">
+            <div class="depth-fill" id="depth-fill"></div>
+            <div class="depth-best" id="depth-best" title="Your record"></div>
+            <div class="depth-me" id="depth-me"></div>
+          </div>
+        </div>
+        <div class="hud-kills"><i class="skull"></i><b id="hud-kills">0</b></div>
+      </div>
+      <div class="boss" id="boss-bar" hidden>
+        <span id="boss-name">Champion</span>
+        <div class="boss-track"><div id="boss-fill"></div></div>
+      </div>
+      <button id="btn-ff" class="ff" type="button" aria-label="Fast forward"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.500v13l8.500-6.500zM12.500 5.500v13L21 12z"/></svg><b id="ff-n">1×</b></button>
+      <div class="banner" id="banner"><h3 id="banner-title"></h3><p id="banner-sub"></p></div>
+      <div class="hud-bottom">
+        <div class="vitals">
+          <div class="boons" id="boons" aria-label="Boons this run"></div>
+          <div class="hero-bars" id="hero-bars"></div>
+        </div>
+        <div class="slots" id="slots"></div>
+      </div>
+      <div id="toasts" class="toasts"></div>
+    </section>
+    <div id="floats"></div>
+
+    <!-- ============ results ============ -->
+    <section id="results" class="screen">
+      <div class="panel results-panel">
+        <p class="eyebrow" id="res-eyebrow">Run 1</p>
+        <h2 id="res-title">You perished</h2>
+        <p class="res-meta" id="res-meta"></p>
+        <ul class="tally" id="res-tally"></ul>
+        <div class="res-total"><span>Spoils</span><b><i class="coin"></i><span id="res-total">0</span></b></div>
+        <button id="btn-results" class="btn btn-gold btn-big" type="button">Spend your gold</button>
+      </div>
+    </section>
+
+    <!-- ============ shop ============ -->
+    <section id="shop" class="screen">
+      <div class="shop-stage">
+        <div class="stage-top">
+          <div class="purse" id="purse"><i class="coin"></i><b id="shop-gold">0</b></div>
+          <button id="btn-mute" class="btn btn-ghost btn-icon" type="button" aria-label="Toggle sound"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9.500v5h3.500L12 18.500v-13L7.500 9.500zM15.500 9a4 4 0 0 1 0 6M18 6.500a7.500 7.500 0 0 1 0 11"/></svg></button>
+          <button id="btn-menu" class="btn btn-ghost btn-icon" type="button" aria-label="Options"><svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.800"/><circle cx="12" cy="12" r="1.800"/><circle cx="19" cy="12" r="1.800"/></svg></button>
+        </div>
+        <div class="tabs" id="class-tabs" hidden></div>
+        <div class="evo" id="evo">
+          <p class="eyebrow">Evolution <span id="evo-step">1 / 6</span></p>
+          <h2 id="evo-name">Apprentice</h2>
+          <p id="evo-blurb" class="evo-blurb"></p>
+          <div class="evo-track"><div id="evo-fill"></div></div>
+          <p class="evo-next" id="evo-next"></p>
+        </div>
+        <button id="btn-go" class="btn btn-gold btn-big" type="button">Draw a rune <i class="chev"></i></button>
+      </div>
+      <div class="shop-panel">
+        <div class="shop-scroll" id="shop-scroll"></div>
+      </div>
+    </section>
+
+    <!-- ============ class choice ============ -->
+    <section id="classes" class="screen">
+      <header class="draw-head">
+        <button id="btn-classes-back" class="btn btn-ghost btn-small" type="button"><i class="chev left"></i>Shop</button>
+        <div class="draw-title"><h2>Your party</h2><p>Everyone you recruit fights side by side. Gold is shared.</p></div>
+        <div class="purse purse-small"><i class="coin"></i><b id="classes-gold">0</b></div>
+      </header>
+      <div class="class-cards" id="class-cards"></div>
+      <button id="btn-party-go" class="btn btn-gold btn-big" type="button">To the cave <i class="chev"></i></button>
+    </section>
+
+    <!-- ============ overlays ============ -->
+    <div id="boon" class="modal boon" hidden>
+      <div class="boon-inner">
+        <p class="eyebrow">Champion slain</p>
+        <h2>Claim a boon</h2>
+        <p class="boon-sub">It lasts until this run ends.</p>
+        <div class="boon-cards" id="boon-cards"></div>
+      </div>
+    </div>
+    <div id="evolve" class="evolve" hidden>
+      <p class="eyebrow" id="evolve-eyebrow">Your mage has evolved</p>
+      <h2 id="evolve-name">Adept</h2>
+      <p id="evolve-bonus"></p>
+    </div>
+    <div id="menu" class="modal" hidden>
+      <div class="panel menu-panel">
+        <h2>Options</h2>
+        <p class="menu-stats" id="menu-stats"></p>
+        <button id="btn-reset" class="btn btn-danger" type="button">Erase all progress</button>
+        <button id="btn-reset-confirm" class="btn btn-danger" type="button" hidden>Tap again to erase everything</button>
+        <button id="btn-menu-close" class="btn btn-ghost" type="button">Close</button>
+      </div>
+    </div>
+    <div id="fade"></div>
+    <div id="loading">Carving the cave&hellip;</div>
+  </div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/build/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+<!--/GAME-->
+</body>
+</html>
