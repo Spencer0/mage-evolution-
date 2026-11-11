@@ -140,7 +140,7 @@ export class RuneInput {
       if (a.kind === 'accept') {
         const morph = Math.min(1, a.t / 0.28);
         if (morph < 1) this.strokePath(ctx, a.user, '200,220,255', 1 - morph, 1);
-        const flyT = Math.max(0, (a.t - 0.8) / 0.42);
+        const flyT = Math.max(0, (a.t - 0.55) / 0.32);
         const e = flyT * flyT;
         const x = a.gx + (a.tx - a.gx) * e, y = a.gy + (a.ty - a.gy) * e, r = a.gr * (1 - e * 0.94);
         const pulse = 1 + Math.sin(a.t * 14) * 0.03 + (1 - morph) * 0.15;

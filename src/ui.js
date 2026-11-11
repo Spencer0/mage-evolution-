@@ -51,6 +51,8 @@ export class UI {
     $('results').addEventListener('pointerdown', e => { if (e.target.id !== 'btn-results') this.finishResults(false); });
     $('btn-go').addEventListener('click', () => g.goCave());
     $('btn-classes-back').addEventListener('click', () => g.toShop(true));
+    $('btn-party-go').addEventListener('click', () => g.toDraw());
+    $('btn-ff').addEventListener('click', () => g.cycleFF());
     $('btn-mute').addEventListener('click', () => g.toggleMute());
     $('btn-menu').addEventListener('click', () => this.openMenu());
     $('btn-menu-close').addEventListener('click', () => { $('menu').hidden = true; g.sfx.click(); });
@@ -77,9 +79,9 @@ export class UI {
   }
 
   // ------------------------------------------------------------ rune drawing
-  setupDraw({ index, count, chosen, unlocked, canShop, first, cls }) {
-    const C = CLASSES[cls], word = C.word;
-    $('draw-heading').textContent = count > 1 ? `Draw ${word} ${index + 1} of ${count}` : `Draw your ${word}`;
+  setupDraw({ index, count, chosen, unlocked, canShop, first, cls, party }) {
+    const C = CLASSES[cls], word = C.word, who = party > 1 ? C.name + ': ' : '';
+    $('draw-heading').textContent = count > 1 ? `${who}${word} ${index + 1} of ${count}` : party > 1 ? `${who}draw your ${word}` : `Draw your ${word}`;
     $('draw-sub').textContent = first ? `Trace ${RUNES[C.starter].shape} in one stroke.`
       : count > 1 && index > 0 ? 'Mix them to set off reactions.'
       : 'Clean lines hit harder. Quick strokes strike faster.';
@@ -152,10 +154,11 @@ export class UI {
     t.className = 'depth-tick boss'; t.style.left = '100%';
     track.appendChild(t);
   }
-  startRun(slots, bestDepth) {
+  startRun(slots, bestDepth, heroes) {
     this.cache = {};
     const wrap = $('slots');
     wrap.textContent = '';
+    wrap.classList.toggle('many', slots.length > 4);
     this.slotEls = slots.map(s => {
       const el = document.createElement('div');
       el.className = 'slot';
@@ -164,13 +167,31 @@ export class UI {
       wrap.appendChild(el);
       return el;
     });
+    // one health bar per hero in the party
+    const bars = $('hero-bars');
+    bars.textContent = '';
+    this.heroEls = heroes.map(cls => {
+      const C = CLASSES[cls], el = document.createElement('div');
+      el.className = 'hbar ' + (heroes.length > 1 ? 'party' : 'solo');
+      el.style.setProperty('--rc', RUNES[C.starter].color);
+      el.innerHTML = `<i title="${C.name}">${glyphSvg(C.starter, 0.3)}</i><div><div class="bar bar-shield" hidden><div class="shield-fill"></div></div>
+        <div class="bar bar-hp"><div class="hp-lag"></div><div class="hp-fill"></div><span class="hp-text"></span></div></div>`;
+      bars.appendChild(el);
+      const q = c => el.querySelector(c);
+      return { el, shieldBar: q('.bar-shield'), shield: q('.shield-fill'), bar: q('.bar-hp'), lag: q('.hp-lag'), fill: q('.hp-fill'), text: q('.hp-text') };
+    });
     $('depth-best').style.left = (Math.min(1, bestDepth / CAVE_LENGTH) * 100) + '%';
     $('depth-best').style.display = bestDepth > 1 ? '' : 'none';
     $('boss-bar').hidden = true;
     $('boons').textContent = '';
-    $('hp-lag').style.width = '100%';
     $('toasts').textContent = '';
     this.setGold(0);
+  }
+  setFF(n, dropped) {
+    const el = $('btn-ff');
+    $('ff-n').textContent = n + '\u00d7';
+    el.classList.toggle('on', n > 1);
+    if (dropped) { el.classList.remove('drop'); void el.offsetWidth; el.classList.add('drop'); }
   }
   set(key, value, fn) { if (this.cache[key] !== value) { this.cache[key] = value; fn(value); } }
   setGold(n, pop) {
@@ -183,10 +204,15 @@ export class UI {
     this.set('depthPct', Math.round(m.d / CAVE_LENGTH * 1000) / 10, v => { $('depth-fill').style.width = v + '%'; $('depth-me').style.left = v + '%'; });
     this.set('zone', biomeAt(m.d).name, v => { $('hud-zone').textContent = v; });
     this.set('kills', sim.kills, v => { $('hud-kills').textContent = v; });
-    this.set('hp', Math.max(0, Math.round(m.hp / m.maxHp * 200) / 2), v => { $('hp-fill').style.width = v + '%'; $('hp-lag').style.width = v + '%'; });
-    this.set('hpt', `${fmt(Math.max(0, Math.ceil(m.hp)))} / ${fmt(Math.ceil(m.maxHp))}`, v => { $('hp-text').textContent = v; });
-    this.set('hasShield', m.maxShield > 0, v => { $('bar-shield').hidden = !v; });
-    if (m.maxShield > 0) this.set('shield', Math.round(m.shield / m.maxShield * 100), v => { $('shield-fill').style.width = v + '%'; });
+    for (let i = 0; i < sim.heroes.length; i++) {
+      const h = sim.heroes[i], el = this.heroEls[i];
+      if (!el) continue;
+      this.set('hp' + i, Math.max(0, Math.round(h.hp / h.maxHp * 200) / 2), v => { el.fill.style.width = v + '%'; el.lag.style.width = v + '%'; });
+      this.set('hpt' + i, h.alive ? `${fmt(Math.max(0, Math.ceil(h.hp)))} / ${fmt(Math.ceil(h.maxHp))}` : 'Down', v => { el.text.textContent = v; });
+      this.set('down' + i, !h.alive, v => { el.el.classList.toggle('down', v); });
+      this.set('hasShield' + i, h.maxShield > 0, v => { el.shieldBar.hidden = !v; });
+      if (h.maxShield > 0) this.set('shield' + i, Math.round(h.shield / h.maxShield * 100), v => { el.shield.style.width = v + '%'; });
+    }
     for (let i = 0; i < sim.slots.length; i++) {
       const s = sim.slots[i], el = this.slotEls[i];
       if (el) el.style.setProperty('--cd', Math.max(0, Math.min(1, s.cd / s.maxCd)).toFixed(2));
@@ -195,7 +221,7 @@ export class UI {
     if (elite) this.set('eliteHp', Math.max(0, Math.round(elite.hp / elite.maxHp * 200) / 2), v => { $('boss-fill').style.width = v + '%'; });
   }
   slotFired(i) { const el = this.slotEls && this.slotEls[i]; if (el) { el.classList.remove('fire'); void el.offsetWidth; el.classList.add('fire'); } }
-  hpHit() { const el = $('bar-hp'); el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit'); }
+  hpHit(i = 0) { const h = this.heroEls && this.heroEls[i]; if (!h) return; const el = h.bar; el.classList.remove('hit'); void el.offsetWidth; el.classList.add('hit'); }
   banner(title, sub = '', color = '') {
     const el = $('banner');
     $('banner-title').textContent = title; $('banner-sub').textContent = sub;
@@ -367,17 +393,17 @@ export class UI {
     $('classes-gold').textContent = fmt(save.gold);
     for (const id of CLASS_ORDER) {
       const C = CLASSES[id], mine = save.cls[id], tier = evolutionTier(save, id);
-      const b = document.createElement('button');
-      b.type = 'button';
+      const b = document.createElement(mine.unlocked ? 'div' : 'button');
+      if (!mine.unlocked) b.type = 'button';
       b.id = 'class-' + id;
-      b.className = 'ccard' + (mine.unlocked ? '' : ' locked') + (id === save.cur ? ' cur' : '');
+      b.className = 'ccard' + (mine.unlocked ? ' joined' : ' locked');
       b.style.setProperty('--rc', RUNES[C.starter].color);
       const can = save.gold >= C.cost;
       b.innerHTML = `<span class="cc-glyph">${glyphSvg(C.starter, 0.16)}</span>
-        <span class="cc-body"><b>${C.name}</b><i>${mine.unlocked ? C.evolutions[tier].name : 'Locked'}</i><span>${C.blurb}</span>
-        <small>${mine.unlocked ? (mine.runs ? `Record ${Math.floor(mine.bestDepth)} m \u00b7 ${mine.runs} run${mine.runs === 1 ? '' : 's'}` : 'Not yet played') : 'Own talents, own shop, own war marks.'}</small></span>
-        <span class="cc-go${mine.unlocked ? '' : can ? ' buy' : ' poor'}">${mine.unlocked ? 'Play' : `<i class="coin"></i>${fmt(C.cost)}`}</span>`;
-      b.addEventListener('click', () => this.game.pickClass(id));
+        <span class="cc-body"><b>${C.name}</b><i>${mine.unlocked ? C.evolutions[tier].name : 'Not recruited'}</i><span>${C.blurb}</span>
+        <small>${mine.unlocked ? (mine.runs ? `${mine.runs} run${mine.runs === 1 ? '' : 's'} \u00b7 deepest ${Math.floor(mine.bestDepth)} m` : 'Just joined') : 'Joins the party with their own talents and shop.'}</small></span>
+        <span class="cc-go${mine.unlocked ? ' in' : can ? ' buy' : ' poor'}">${mine.unlocked ? 'Joined' : `<i class="coin"></i>${fmt(C.cost)}`}</span>`;
+      if (!mine.unlocked) b.addEventListener('click', () => this.game.recruit(id));
       wrap.appendChild(b);
     }
     this.show('classes');

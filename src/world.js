@@ -623,7 +623,7 @@ export class World {
     const tl = _v2.set(cfg.look[0], cfg.look[1], cfg.look[2]).add(focus);
     if (this.camSnap) { this.camPos.copy(tp); this.camLook.copy(tl); this.camera.fov = cfg.fov; this.camSnap = false; this.viewShiftCur.x = this.viewShift.x; this.viewShiftCur.y = this.viewShift.y; }
     else {
-      const k = this.camMode === 'run' || this.camMode === 'boss' ? 6 : 2.6;
+      const k = this.camMode === 'run' || this.camMode === 'boss' ? 6 * (this.rate || 1) : 2.6;   // rate > 1 while fast-forwarding
       this.camPos.x = damp(this.camPos.x, tp.x, k, dt); this.camPos.y = damp(this.camPos.y, tp.y, k, dt); this.camPos.z = damp(this.camPos.z, tp.z, k * 1.6, dt);
       this.camLook.x = damp(this.camLook.x, tl.x, k, dt); this.camLook.y = damp(this.camLook.y, tl.y, k, dt); this.camLook.z = damp(this.camLook.z, tl.z, k * 1.6, dt);
       this.camera.fov = damp(this.camera.fov, cfg.fov + this.speedK * 7, 3, dt);

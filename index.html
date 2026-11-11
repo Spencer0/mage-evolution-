@@ -64,12 +64,12 @@
         <span id="boss-name">Champion</span>
         <div class="boss-track"><div id="boss-fill"></div></div>
       </div>
+      <button id="btn-ff" class="ff" type="button" aria-label="Fast forward"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M3 5.500v13l8.500-6.500zM12.500 5.500v13L21 12z"/></svg><b id="ff-n">1×</b></button>
       <div class="banner" id="banner"><h3 id="banner-title"></h3><p id="banner-sub"></p></div>
       <div class="hud-bottom">
         <div class="vitals">
           <div class="boons" id="boons" aria-label="Boons this run"></div>
-          <div class="bar bar-shield" id="bar-shield" hidden><div id="shield-fill"></div></div>
-          <div class="bar bar-hp" id="bar-hp"><div id="hp-lag"></div><div id="hp-fill"></div><span id="hp-text"></span></div>
+          <div class="hero-bars" id="hero-bars"></div>
         </div>
         <div class="slots" id="slots"></div>
       </div>
@@ -116,10 +116,11 @@
     <section id="classes" class="screen">
       <header class="draw-head">
         <button id="btn-classes-back" class="btn btn-ghost btn-small" type="button"><i class="chev left"></i>Shop</button>
-        <div class="draw-title"><h2>Choose your hero</h2><p>Each hero keeps their own talents. Gold is shared.</p></div>
+        <div class="draw-title"><h2>Your party</h2><p>Everyone you recruit fights side by side. Gold is shared.</p></div>
         <div class="purse purse-small"><i class="coin"></i><b id="classes-gold">0</b></div>
       </header>
       <div class="class-cards" id="class-cards"></div>
+      <button id="btn-party-go" class="btn btn-gold btn-big" type="button">To the cave <i class="chev"></i></button>
     </section>
 
     <!-- ============ overlays ============ -->

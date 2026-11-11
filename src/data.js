@@ -383,7 +383,7 @@ export function computeStats(save, cls = save.cur) {
 export function newSave() {
   const c = unlocked => ({ unlocked, upgrades: {}, runs: 0, bestDepth: 0, lastRunes: [] });
   return {
-    v: 2, gold: 0, totalGold: 0, runs: 0, victories: 0, bestTime: 0, muted: false, cur: 'mage',
+    v: 2, gold: 0, totalGold: 0, runs: 0, bestDepth: 0, victories: 0, bestTime: 0, muted: false, cur: 'mage', ff: 1,
     cls: { mage: c(true), warrior: c(false) },
   };
 }
@@ -395,6 +395,7 @@ export function migrateSave(s) {
     Object.assign(out, s);
     for (const id of CLASS_ORDER) out.cls[id] = Object.assign(newSave().cls[id], (s.cls || {})[id]);
     if (!CLASSES[out.cur] || !out.cls[out.cur].unlocked) out.cur = 'mage';
+    out.bestDepth = Math.max(out.bestDepth || 0, ...CLASS_ORDER.map(id => out.cls[id].bestDepth || 0));
     return out;
   }
   // v1: a single mage
@@ -404,7 +405,7 @@ export function migrateSave(s) {
   m.upgrades = { ...(s.upgrades || {}) };
   if (m.upgrades.frenzy) { m.upgrades.trophy = m.upgrades.frenzy; delete m.upgrades.frenzy; }
   m.runs = s.runs || 0;
-  m.bestDepth = (s.bestDepth || 0) * 1;
+  m.bestDepth = out.bestDepth = s.bestDepth || 0;
   return out;
 }
 

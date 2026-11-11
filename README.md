@@ -32,7 +32,8 @@ http(s) because it uses ES modules.
 | Arcane | circle | Seeker Missiles | Marked orcs drop +60% gold. The farming rune. |
 | Void | five-point star | Singularity | Drags a pack together and crushes it. Hardest to draw. |
 
-**Warrior** (50,000 gold; the hero screen appears before each run once you have two runs)
+**Warrior** (recruit for 50,000 gold on the party screen, which appears before each run once
+you have two runs; after that he fights alongside the mage in every run)
 
 | War mark | Shape | Attack | Why you would pick it |
 | --- | --- | --- | --- |
@@ -42,7 +43,9 @@ http(s) because it uses ES modules.
 | Whirl | spiral | Whirlwind | Constant damage all round, and it heals. |
 | Judgement | crown | Sky blade | A spectral greatsword on the thickest pack. Hardest to draw. |
 
-Each hero has their own shop, talents and six evolutions. Gold is shared.
+Each hero has their own shop, talents, runes and six evolutions. Gold is shared. In a party
+the warrior takes point and soaks most of the blows while the mage casts from behind; each
+hero draws their own runes before the run, and the run ends when everyone is down.
 
 - **It is a sprint, not a stand-off.** The mage never stops for fodder. Goblins die in one
   hit and come in tides; each one that latches on slows the sprint a little. Axe throwers
@@ -53,6 +56,8 @@ Each hero has their own shop, talents and six evolutions. Gold is shared.
 - **Extra Sigils** let you draw two, then three runes per run. Mixing elements sets off
   reactions: fire on a chilled orc is a *Thermal Shock* (double damage), lightning on a
   burning orc is an *Overload* (explosion), frost on a shocked orc is a *Deep Freeze*.
+- **Fast-forward** (1× / 2× / 4× / 16×) is a button on the run screen. It is remembered
+  between runs and drops back to 1× by itself the moment you pass your record depth.
 - **Champions** guard every 200 m. Each one slain stops the run for a moment and offers two
   boons; the one you take lasts until the run ends.
 - Frost has a second use: chilled orcs cannot keep up, so the mage shakes them off.
@@ -81,13 +86,12 @@ seconds:
 ```bash
 npm run balance            # a bot drawing B/A-grade runes
 node tools/balance.mjs 1                 # a bot that draws perfect runes
-node tools/balance.mjs 0.45 3 --verbose
-node tools/balance.mjs 0.8 1 warrior     # quality, seed, class
+node tools/balance.mjs 0.45 3 --verbose  # quality, seed
+node tools/balance.mjs 0.8 1 --solo      # never recruit the warrior
 ```
 
 It prints every run's length, depth, kills and income until the Warlord dies. With the
-current numbers that takes about 19 to 26 runs for either hero, depending on how well the
-runes are drawn.
+current numbers that takes about 22 runs; the bot recruits the warrior around run 18.
 
 ## Debugging
 

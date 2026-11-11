@@ -103,8 +103,10 @@ export class Vfx {
     this.smoke = new Particles(scene, 500, THREE.NormalBlending);
     this.t = 0;
     this.onCoin = null;
-    this.magePos = new THREE.Vector3();
-    this.staffTip = new THREE.Vector3(0, 2.4, 0);
+    this.magePos = new THREE.Vector3();                 // where coins fly to: the hero on point
+    this.tips = [new THREE.Vector3(0, 2.4, 0), new THREE.Vector3(0, 2.4, 0)];   // weapon tip of each hero in the party
+    this.heroPos = [new THREE.Vector3(), new THREE.Vector3()];
+    this.lod = 1;                                       // < 1 while fast-forwarding: fewer particles, same game
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     // ---- coins
@@ -184,10 +186,13 @@ export class Vfx {
     }));
     this.shield.visible = false; this.shield.renderOrder = 4;
     scene.add(this.shield);
-    this.shieldK = 0; this.shieldHit = 0;
+    this.shields = [this.shield, new THREE.Mesh(this.shield.geometry, this.shield.material.clone())];
+    this.shields[1].visible = false; this.shields[1].renderOrder = 4;
+    scene.add(this.shields[1]);
+    this.shieldK = [0, 0]; this.shieldHit = [0, 0];
     this.wisps = [];
     const wispMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xbfe8ff).multiplyScalar(3) });
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 6; i++) {
       const m = new THREE.Mesh(this.projGeo.orb, wispMat);
       m.scale.setScalar(0.14); m.visible = false;
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0x9fd8ff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
@@ -225,12 +230,14 @@ export class Vfx {
     for (const m of this.meteors) { m.mesh.visible = false; m.ring.visible = false; }
     this.meteors.length = 0;
     for (const l of this.lights) { l.l.intensity = 0; l.t = 0; }
-    this.shield.visible = false; this.shieldK = 0;
+    for (const sh of this.shields) sh.visible = false;
+    this.shieldK = [0, 0];
   }
 
   // ------------------------------------------------------------ primitives
   burst(x, y, z, color, n, speed, size, life, o = {}) {
     const up = o.up ?? 0.5, grav = o.grav ?? 0, drag = o.drag ?? 2, sys = o.smoke ? this.smoke : this.glow, k = o.boost ?? 1.6;
+    if (this.lod < 1) n = Math.max(1, Math.round(n * this.lod));
     for (let i = 0; i < n; i++) {
       const a = Math.random() * 6.283, e = Math.acos(rand(-1, 1)), sp = speed * rand(0.35, 1);
       const vx = Math.sin(e) * Math.cos(a) * sp, vy = Math.cos(e) * sp + up * speed, vz = Math.sin(e) * Math.sin(a) * sp;
@@ -270,6 +277,7 @@ export class Vfx {
     best.t = dur; best.dur = dur; best.peak = peak * 0.3;
   }
   spawnDebris(x, y, z, color, n, speed, dirX = 0, dirZ = 0) {
+    if (this.lod < 1) n = Math.round(n * this.lod);
     for (let i = 0; i < n && this.debris.length < this.DEB; i++) {
       this.debris.push({
         x, y: y + rand(-0.3, 0.5), z, vx: rand(-1, 1) * speed + dirX * speed, vy: rand(2, 7), vz: rand(-1, 1) * speed + dirZ * speed,
@@ -279,6 +287,7 @@ export class Vfx {
     }
   }
   spawnCoins(x, z, value, n) {
+    if (this.lod < 1) n = Math.max(1, Math.round(n * this.lod));
     const each = value / n;
     for (let i = 0; i < n; i++) {
       if (this.coins.length >= this.COINS) { this.onCoin && this.onCoin(each, false); continue; }
@@ -367,6 +376,7 @@ export class Vfx {
   }
 
   hitSpark(x, y, z, element, crit) {
+    if (this.lod < 0.4 && !crit) return;
     const c = ELEMENT_COLOR[element] || ELEMENT_COLOR.phys;
     this.burst(x, y, z, c, crit ? 14 : 6, crit ? 9 : 5, crit ? 0.5 : 0.36, 0.28, { drag: 5, jitter: 0.25 });
     if (element === 'frost') this.burst(x, y, z, _c.setRGB(0.9, 1, 1), 5, 4, 0.2, 0.5, { grav: 9, drag: 1 });
@@ -386,8 +396,9 @@ export class Vfx {
     if (big > 1) { this.ring(x, 0.12, z, c, 2.2 * big, 0.4, 2); this.light(x, h, z, c, 300 * big, 0.4); this.world.shake(0.2 * big); }
   }
 
-  castFlash(rune) {
-    const R = RUNES[rune], c = _c.set(R.hex).clone(), p = this.staffTip;
+  castFlash(rune, hero = 0) {
+    if (this.lod < 0.4) return;
+    const R = RUNES[rune], c = _c.set(R.hex).clone(), p = this.tips[hero];
     this.burst(p.x, p.y, p.z, c, 8, 3.5, 0.5, 0.25, { drag: 4, jitter: 0.05 });
     this.flash(p.x, p.y, p.z, c, 0.55, 0.12, 2.4);
   }
@@ -431,8 +442,8 @@ export class Vfx {
         v = (this.projFree[p.kind] && this.projFree[p.kind].pop()) || this.makeProj(p.kind);
         v.m.visible = true; v.age = 0;
         if (p.hostile) v.m.position.set(tx, 1.7, tz);
-        else if (p.kind === 'wisp' && this.wisps[p.wisp]) v.m.position.copy(this.wisps[p.wisp].position);
-        else v.m.position.copy(this.staffTip);
+        else if (p.kind === 'wisp') v.m.position.copy(this.wisps[(p.by ? p.by.idx : 0) * 3 + p.wisp].position);
+        else v.m.position.copy(this.tips[p.by ? p.by.idx : 0]);
         v.px = v.m.position.x; v.py = v.m.position.y; v.pz = v.m.position.z;
         live.set(p.id, v);
       }
@@ -547,11 +558,11 @@ export class Vfx {
   // ------------------------------------------------------------ sim events
   handle(ev, sim) {
     switch (ev.type) {
-      case 'cast': this.castFlash(ev.rune); break;
+      case 'cast': this.castFlash(ev.rune, ev.hero || 0); break;
       case 'projEnd': this.endProjectile(ev.p, ev.hit); break;
       case 'explode': this.explosion(ev.kind, ev.x, -ev.d, ev.r); break;
       case 'bolt': {
-        const pts = ev.pts.map(p => p.src ? this.staffTip.clone() : new THREE.Vector3(p.x, 1.2 * (p.r / 0.6) * 0.9 + 0.2, -p.d));
+        const pts = ev.pts.map(p => p.src ? this.tips[ev.hero || 0].clone() : new THREE.Vector3(p.x, 1.2 * (p.r / 0.6) * 0.9 + 0.2, -p.d));
         this.bolt(pts);
         break;
       }
@@ -594,14 +605,14 @@ export class Vfx {
         break;
       }
       case 'shieldBreak': {
-        const p = this.magePos, c = _c.setRGB(0.45, 0.75, 1).clone();
+        const p = this.heroPos[ev.hero || 0], c = _c.setRGB(0.45, 0.75, 1).clone();
         this.burst(p.x, 1.5, p.z, c, 34, 10, 0.5, 0.5, { drag: 3 });
         this.ring(p.x, 0.14, p.z, c, 3.5, 0.35, 2);
         break;
       }
       case 'revive': this.world.flash(0xffd070, 0.8); break;
       case 'enemyHit': {
-        const p = this.magePos;
+        const p = this.heroPos[ev.hero || 0];
         this.burst(p.x, 1.5, p.z + 0.3, _c.setRGB(1, 0.2, 0.12), 8, 5, 0.42, 0.25, { drag: 4 });
         break;
       }
@@ -779,36 +790,39 @@ export class Vfx {
       for (let i = 0; i < 4; i++) this.glow.emit(m.mesh.position.x + rand(-0.4, 0.4), m.mesh.position.y + rand(-0.4, 0.4) + (m.spirit ? rand(0, 3) : 0), m.mesh.position.z + rand(-0.4, 0.4), rand(-1, 1), rand(0, 2), rand(-1, 1), m.spirit ? 0.9 : 2, m.spirit ? 1.5 : 0.7 + Math.random() * 0.5, m.spirit ? 2 : 0.15, rand(0.9, 1.6), rand(0.3, 0.55), 0, 1, 0);
     }
 
-    // mage attachments
-    const mg = ctx.mage;
-    if (mg) {
-      const target = mg.shieldFrac > 0 ? 0.05 + mg.shieldFrac * 0.1 : 0;
-      this.shieldK = damp(this.shieldK, target, 8, dt);
-      this.shieldHit = Math.max(0, this.shieldHit - dt * 4);
-      this.shield.visible = this.shieldK > 0.01;
-      if (this.shield.visible) {
-        this.shield.position.set(mp.x, 1.55, mp.z);
-        const u = this.shield.material.uniforms;
-        u.uAlpha.value = this.shieldK; u.uHit.value = this.shieldHit; u.uTime.value = t;
+    // hero attachments: barrier, wisps, weapon embers, sprint dust
+    const heroes = ctx.heroes || [];
+    for (let hi = 0; hi < 2; hi++) {
+      const mg = heroes[hi], sh = this.shields[hi], hp = this.heroPos[hi];
+      if (mg) hp.copy(mg.pos);
+      const target = mg && mg.shieldFrac > 0 ? 0.05 + mg.shieldFrac * 0.1 : 0;
+      this.shieldK[hi] = damp(this.shieldK[hi], target, 8, dt);
+      this.shieldHit[hi] = Math.max(0, this.shieldHit[hi] - dt * 4);
+      sh.visible = this.shieldK[hi] > 0.01;
+      if (sh.visible) {
+        sh.position.set(hp.x, 1.55, hp.z);
+        const u = sh.material.uniforms;
+        u.uAlpha.value = this.shieldK[hi]; u.uHit.value = this.shieldHit[hi]; u.uTime.value = t;
       }
-      for (let i = 0; i < this.wisps.length; i++) {
-        const w = this.wisps[i];
-        w.visible = i < mg.wisps;
+      for (let i = 0; i < 3; i++) {
+        const w = this.wisps[hi * 3 + i];
+        w.visible = !!mg && i < mg.wisps;
         if (!w.visible) continue;
-        const a = t * 2.1 + i * (6.283 / Math.max(1, mg.wisps));
-        w.position.set(mp.x + Math.sin(a) * 1.45, 2.7 + Math.sin(t * 3 + i * 2) * 0.3, mp.z + Math.cos(a) * 1.45);
+        const a = t * 2.1 + i * (6.283 / Math.max(1, mg.wisps)) + hi * 1.7;
+        w.position.set(hp.x + Math.sin(a) * 1.45, 2.7 + Math.sin(t * 3 + i * 2) * 0.3, hp.z + Math.cos(a) * 1.45);
         if (Math.random() < dt * 30) this.glow.emit(w.position.x, w.position.y, w.position.z, 0, 0, 0, 0.9, 1.4, 1.9, 0.3, 0.3, 0, 0, 0);
       }
+      if (!mg) continue;
       // dust kicked up by the sprint
-      if (mg.speed > 0.5 && Math.random() < dt * 26 * mg.speed) this.smoke.emit(mp.x + rand(-0.3, 0.3), 0.12, mp.z + rand(0.2, 0.7), rand(-0.6, 0.6), rand(0.3, 1), rand(1, 2.5), 0.13, 0.11, 0.1, rand(0.35, 0.6), rand(0.3, 0.5), 0, 1.5, 1.8);
-      // staff embers in the active element
+      if (mg.speed > 0.5 && Math.random() < dt * 26 * mg.speed) this.smoke.emit(hp.x + rand(-0.3, 0.3), 0.12, hp.z + rand(0.2, 0.7), rand(-0.6, 0.6), rand(0.3, 1), rand(1, 2.5), 0.13, 0.11, 0.1, rand(0.35, 0.6), rand(0.3, 0.5), 0, 1.5, 1.8);
+      // weapon embers in the active element
       if (mg.element && Math.random() < dt * (10 + mg.tier * 5)) {
-        const c = ELEMENT_COLOR[mg.element] || ELEMENT_COLOR.phys, p = this.staffTip;
+        const c = ELEMENT_COLOR[mg.element] || ELEMENT_COLOR.phys, p = this.tips[hi];
         this.glow.emit(p.x + rand(-0.12, 0.12), p.y + rand(-0.1, 0.1), p.z + rand(-0.12, 0.12), rand(-0.3, 0.3), rand(0.4, 1.3), rand(-0.3, 0.3), c.r * 1.7, c.g * 1.7, c.b * 1.7, rand(0.18, 0.38), rand(0.4, 0.8), 0, 0.5, 0);
       }
       if (mg.tier >= 4 && Math.random() < dt * 14) {
         const a = Math.random() * 6.283, r = rand(0.5, 0.9);
-        this.glow.emit(mp.x + Math.cos(a) * r, 0.1, mp.z + Math.sin(a) * r, 0, rand(0.8, 1.8), 0, 1.9, 1.5, 0.6, 0.2, rand(0.8, 1.3), 0, 0, 0);
+        this.glow.emit(hp.x + Math.cos(a) * r, 0.1, hp.z + Math.sin(a) * r, 0, rand(0.8, 1.8), 0, 1.9, 1.5, 0.6, 0.2, rand(0.8, 1.3), 0, 0, 0);
       }
     }
 
