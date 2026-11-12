@@ -10,6 +10,7 @@ export const ELEMENT_COLOR = {
   phys: new THREE.Color(0xffd890),
   steel: new THREE.Color(0xffd0c0), iron: new THREE.Color(0xffa040), earth: new THREE.Color(0xd09a48),
   blood: new THREE.Color(0xff2a5a), spirit: new THREE.Color(0x8fdcff),
+  lead: new THREE.Color(0xffd040), tech: new THREE.Color(0x4ad0ff), toxin: new THREE.Color(0xa8f040), heal: new THREE.Color(0x6dffa8),
 };
 export const ORC_HEIGHT = { grunt: 1.25, whelp: 0.8, archer: 1.2, brute: 2.0, shaman: 1.25, loot: 1.15, champion: 2.5, boss: 3.7 };
 
@@ -104,8 +105,8 @@ export class Vfx {
     this.t = 0;
     this.onCoin = null;
     this.magePos = new THREE.Vector3();                 // where coins fly to: the hero on point
-    this.tips = [new THREE.Vector3(0, 2.4, 0), new THREE.Vector3(0, 2.4, 0)];   // weapon tip of each hero in the party
-    this.heroPos = [new THREE.Vector3(), new THREE.Vector3()];
+    this.tips = [0, 1, 2, 3].map(() => new THREE.Vector3(0, 2.4, 0));   // weapon tip of each hero in the party
+    this.heroPos = [0, 1, 2, 3].map(() => new THREE.Vector3());
     this.lod = 1;                                       // < 1 while fast-forwarding: fewer particles, same game
     this.reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -186,13 +187,12 @@ export class Vfx {
     }));
     this.shield.visible = false; this.shield.renderOrder = 4;
     scene.add(this.shield);
-    this.shields = [this.shield, new THREE.Mesh(this.shield.geometry, this.shield.material.clone())];
-    this.shields[1].visible = false; this.shields[1].renderOrder = 4;
-    scene.add(this.shields[1]);
-    this.shieldK = [0, 0]; this.shieldHit = [0, 0];
+    this.shields = [this.shield];
+    for (let i = 1; i < 4; i++) { const sh = new THREE.Mesh(this.shield.geometry, this.shield.material.clone()); sh.visible = false; sh.renderOrder = 4; scene.add(sh); this.shields.push(sh); }
+    this.shieldK = [0, 0, 0, 0]; this.shieldHit = [0, 0, 0, 0];
     this.wisps = [];
     const wispMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0xbfe8ff).multiplyScalar(3) });
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 12; i++) {
       const m = new THREE.Mesh(this.projGeo.orb, wispMat);
       m.scale.setScalar(0.14); m.visible = false;
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture, color: 0x9fd8ff, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
@@ -205,7 +205,7 @@ export class Vfx {
 
   /** Build one of everything pooled so the first fight does not hitch on shader compiles. */
   prewarm() {
-    for (const kind of ['fireball', 'lance', 'missile', 'wisp', 'hex', 'axe', 'haxe']) this.freeProj(this.makeProj(kind));
+    for (const kind of ['fireball', 'lance', 'missile', 'wisp', 'hex', 'axe', 'haxe', 'bullet', 'dart', 'bomb']) this.freeProj(this.makeProj(kind));
     const c = ELEMENT_COLOR.fire;
     for (let i = 0; i < 6; i++) { this.ring(0, -50, 0, c, 1, 0.01); this.flash(0, -50, 0, c, 1, 0.01); }
     this.addZone({ id: -1, x: 0, d: 0, r: 1, t: 0, dur: 0.01, dead: true });
@@ -231,7 +231,7 @@ export class Vfx {
     this.meteors.length = 0;
     for (const l of this.lights) { l.l.intensity = 0; l.t = 0; }
     for (const sh of this.shields) sh.visible = false;
-    this.shieldK = [0, 0];
+    this.shieldK = [0, 0, 0, 0];
   }
 
   // ------------------------------------------------------------ primitives
@@ -340,6 +340,37 @@ export class Vfx {
       this.light(x, 3, z, c, 1500, 0.8);
       W.shake(1.1);
       W.flash(0xffc060, 0.6);
+    } else if (kind === 'bomb') {
+      const c = ELEMENT_COLOR.fire;
+      this.flash(x, 1.0, z, _c.setRGB(1, 0.8, 0.5), r * 0.7, 0.2, 3);
+      this.ring(x, 0.12, z, c, r, 0.32, 2.2);
+      this.burst(x, 1, z, c, 22, 8, 0.8, 0.45, { up: 0.4, drag: 3 });
+      this.burst(x, 1.2, z, _c.setRGB(0.09, 0.08, 0.08), 7, 2.6, 2.4, 0.9, { smoke: true, up: 0.8, boost: 1, end: 1.6 });
+      this.spawnDebris(x, 0.3, z, _c.setRGB(0.22, 0.2, 0.2), 5, 6);
+      this.light(x, 1.6, z, c, 400, 0.3);
+      W.shake(0.3);
+    } else if (kind === 'crit') {
+      const c = _c.setRGB(1, 0.95, 0.6).clone();
+      this.flash(x, 1.2, z, c, r * 0.6, 0.14, 3);
+      this.ring(x, 0.14, z, c, r, 0.22, 2.2);
+      this.burst(x, 1.2, z, c, 12, 9, 0.34, 0.25, { drag: 5 });
+    } else if (kind === 'laser') {
+      const c = ELEMENT_COLOR.spirit, pink = _c.setRGB(1, 0.4, 0.85).clone();
+      this.flash(x, 1.2, z, pink, r * 0.7, 0.2, 3.4);
+      this.ring(x, 0.13, z, pink, r, 0.3, 2.6);
+      // a column of light coming down
+      for (let i = 0; i < 16; i++) this.glow.emit(x + rand(-0.3, 0.3), 0.5 + i * 1.1, z + rand(-0.3, 0.3), 0, -6, 0, 2, 0.6, 1.7, rand(0.6, 1.1), 0.22, 0, 0, 0.3);
+      this.burst(x, 0.8, z, c, 14, 9, 0.5, 0.4, { up: 0.5, drag: 3 });
+      this.light(x, 2, z, pink, 520, 0.3);
+      W.shake(0.35);
+    } else if (kind === 'defib') {
+      const c = ELEMENT_COLOR.storm;
+      this.flash(x, 1.3, z, _c.setRGB(0.8, 0.95, 1), r * 0.5, 0.2, 3);
+      this.ring(x, 0.13, z, c, r, 0.4, 2.6);
+      this.ring(x, 0.15, z, _c.setRGB(0.9, 1, 1), r * 0.6, 0.26, 2.2);
+      this.burst(x, 1.2, z, c, 34, 13, 0.4, 0.35, { drag: 4 });
+      this.light(x, 2, z, c, 600, 0.35);
+      W.shake(0.45);
     } else if (kind === 'quake') {
       const c = ELEMENT_COLOR.earth;
       this.ring(x, 0.12, z, c, r, 0.34, 2.4);
@@ -420,6 +451,9 @@ export class Vfx {
       const blade = new THREE.Mesh(this.projGeo.blade, new THREE.MeshBasicMaterial({ color: new THREE.Color(0xffc070).multiplyScalar(2.4) }));
       blade.position.set(0, 0.3, 0.14); m.add(blade); m.scale.setScalar(1.5);
     }
+    else if (kind === 'bullet') { m = withGlow(mk(this.projGeo.orb, 0xfff0a0, 3.4), 0x4ad0ff, 3.2); m.scale.set(0.07, 0.07, 0.07); }
+    else if (kind === 'dart') { m = withGlow(mk(this.projGeo.lance, 0xd8ff8a, 3), 0xa8f040, 3.6); m.scale.set(0.07, 0.07, 0.42); }
+    else if (kind === 'bomb') { m = withGlow(new THREE.Mesh(this.projGeo.orb, new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.4, metalness: 0.6, emissive: 0x401808 })), 0xff7a2a, 4.2); m.scale.setScalar(0.26); }
     else if (kind === 'hex') { m = withGlow(mk(this.projGeo.orb, 0xb040ff, 2.6), 0x9a30e0, 7); m.scale.setScalar(0.24); }
     else {   // a thrown axe, tumbling end over end
       m = new THREE.Mesh(this.projGeo.shaft, new THREE.MeshStandardMaterial({ color: 0x8a6a48, emissive: 0x3a2410 }));
@@ -442,6 +476,7 @@ export class Vfx {
         v = (this.projFree[p.kind] && this.projFree[p.kind].pop()) || this.makeProj(p.kind);
         v.m.visible = true; v.age = 0;
         if (p.hostile) v.m.position.set(tx, 1.7, tz);
+        else if (p.jump) v.m.position.set(tx, 1.3, tz);       // a forked spell starts where the last one ended
         else if (p.kind === 'wisp') v.m.position.copy(this.wisps[(p.by ? p.by.idx : 0) * 3 + p.wisp].position);
         else v.m.position.copy(this.tips[p.by ? p.by.idx : 0]);
         v.px = v.m.position.x; v.py = v.m.position.y; v.pz = v.m.position.z;
@@ -454,10 +489,13 @@ export class Vfx {
       const blend = clamp(v.age * 9);
       m.position.x = lerp(m.position.x, tx, blend);
       m.position.z = lerp(m.position.z, tz, blend);
-      const targetY = p.hostile ? 1.5 + Math.sin(Math.min(1, v.age * 1.6) * Math.PI) * 1.1 : p.kind === 'fireball' ? 1.25 + Math.sin(clamp(v.age * 2.2) * Math.PI) * 0.5 : 1.2;
+      const targetY = p.kind === 'bomb' ? 1.0 + Math.sin(clamp(v.age * 1.7) * Math.PI) * 2.6 : p.hostile ? 1.5 + Math.sin(Math.min(1, v.age * 1.6) * Math.PI) * 1.1 : p.kind === 'fireball' ? 1.25 + Math.sin(clamp(v.age * 2.2) * Math.PI) * 0.5 : 1.2;
       m.position.y = damp(m.position.y, targetY, 7, dt);
       const dx = m.position.x - v.px, dy = m.position.y - v.py, dz = m.position.z - v.pz;
-      if (p.kind === 'haxe') { m.rotation.x += dt * 26; m.rotation.y = Math.atan2(dx, dz); for (let i = 0; i < 2; i++) this.glow.emit(m.position.x - dx * i * 0.5, m.position.y, m.position.z - dz * i * 0.5, 0, 0, 0, 1.9, 1.0, 0.35, 0.34, 0.2, 0, 0, 0); }
+      if (p.kind === 'dart') { if (dx * dx + dz * dz > 1e-6) { _v.set(m.position.x + dx, m.position.y + dy, m.position.z + dz); m.lookAt(_v); } this.glow.emit(m.position.x, m.position.y, m.position.z, 0, 0, 0, 1.1, 1.7, 0.3, 0.22, 0.16, 0, 0, 0); }
+      else if (p.kind === 'bullet') { this.glow.emit(m.position.x - dx * 0.5, m.position.y, m.position.z - dz * 0.5, 0, 0, 0, 1.9, 1.6, 0.6, 0.2, 0.08, 0, 0, 0); }
+      else if (p.kind === 'bomb') { m.rotation.x += dt * 8; if (Math.random() < dt * 40) this.glow.emit(m.position.x, m.position.y + 0.2, m.position.z, rand(-0.5, 0.5), 1, rand(-0.5, 0.5), 2, 0.9, 0.2, 0.26, 0.25, 0, 0, 0); }
+      else if (p.kind === 'haxe') { m.rotation.x += dt * 26; m.rotation.y = Math.atan2(dx, dz); for (let i = 0; i < 2; i++) this.glow.emit(m.position.x - dx * i * 0.5, m.position.y, m.position.z - dz * i * 0.5, 0, 0, 0, 1.9, 1.0, 0.35, 0.34, 0.2, 0, 0, 0); }
       else if (p.kind === 'axe') { m.rotation.x -= dt * 22; m.rotation.y = Math.atan2(dx, dz); if (Math.random() < dt * 30) this.glow.emit(m.position.x, m.position.y, m.position.z, 0, 0, 0, 0.9, 0.9, 1.0, 0.22, 0.16, 0, 0, 0); }
       else if (p.kind === 'lance') {
         if (dx * dx + dz * dz > 1e-6) { _v.set(m.position.x + dx, m.position.y + dy, m.position.z + dz); m.lookAt(_v); }
@@ -482,7 +520,9 @@ export class Vfx {
     const v = this.projLive.get(p.id);
     const x = v ? v.m.position.x : p.x, y = v ? v.m.position.y : 1.3, z = v ? v.m.position.z : -p.d;
     if (v) { this.projLive.delete(p.id); this.freeProj(v); }
-    if (p.kind === 'haxe') this.burst(x, y, z, ELEMENT_COLOR.iron, 10, 6, 0.36, 0.3, { grav: 10, drag: 2 });
+    if (p.kind === 'bullet') { if (this.lod >= 1) this.burst(x, y, z, ELEMENT_COLOR.tech, 3, 4, 0.24, 0.16, { drag: 5 }); }
+    else if (p.kind === 'dart') this.burst(x, y, z, ELEMENT_COLOR.toxin, 5, 4, 0.3, 0.3, { grav: 6, drag: 2 });
+    else if (p.kind === 'haxe') this.burst(x, y, z, ELEMENT_COLOR.iron, 10, 6, 0.36, 0.3, { grav: 10, drag: 2 });
     else if (p.kind === 'lance') { this.burst(x, y, z, ELEMENT_COLOR.frost, 12, 6, 0.4, 0.4, { grav: 8, drag: 1 }); }
     else if (p.kind === 'missile') { this.burst(x, y, z, ELEMENT_COLOR.arcane, 10, 5, 0.45, 0.3, { drag: 4 }); this.flash(x, y, z, ELEMENT_COLOR.arcane, 0.8, 0.14, 2); }
     else if (p.kind === 'wisp') this.burst(x, y, z, ELEMENT_COLOR.wisp, 5, 4, 0.3, 0.22, { drag: 4 });
@@ -490,8 +530,8 @@ export class Vfx {
   }
 
   // ------------------------------------------------------------ lightning
-  bolt(points, color = ELEMENT_COLOR.storm, width = 0.085) {
-    this.bolts.push({ pts: points.map(p => p.clone()), t: 0, dur: 0.2, jit: 0, segs: [], color: color.clone(), width });
+  bolt(points, color = ELEMENT_COLOR.storm, width = 0.085, jag = 1) {
+    this.bolts.push({ pts: points.map(p => p.clone()), t: 0, dur: jag ? 0.2 : 0.12, jit: 0, segs: [], color: color.clone(), width, jag });
     for (let i = 1; i < points.length; i++) {
       const p = points[i];
       this.burst(p.x, p.y, p.z, color, 9, 6, 0.36, 0.26, { drag: 5 });
@@ -507,10 +547,10 @@ export class Vfx {
       const len = a.distanceTo(c), n = Math.max(3, Math.min(10, Math.round(len / 1.1)));
       let px = a.x, py = a.y, pz = a.z;
       for (let k = 1; k <= n; k++) {
-        const t = k / n, amp = Math.sin(t * Math.PI) * Math.min(0.9, len * 0.14);
+        const t = k / n, amp = Math.sin(t * Math.PI) * Math.min(0.9, len * 0.14) * b.jag;
         const x = lerp(a.x, c.x, t) + (k < n ? rand(-amp, amp) : 0), y = lerp(a.y, c.y, t) + (k < n ? rand(-amp, amp) : 0), z = lerp(a.z, c.z, t) + (k < n ? rand(-amp, amp) : 0);
         b.segs.push(px, py, pz, x, y, z, 1);
-        if (k < n && Math.random() < 0.22) b.segs.push(x, y, z, x + rand(-0.9, 0.9), y + rand(-0.2, 0.9), z + rand(-0.9, 0.9), 0.5);
+        if (b.jag && k < n && Math.random() < 0.22) b.segs.push(x, y, z, x + rand(-0.9, 0.9), y + rand(-0.2, 0.9), z + rand(-0.9, 0.9), 0.5);
         px = x; py = y; pz = z;
       }
     }
@@ -576,8 +616,42 @@ export class Vfx {
         for (let i = 0; i < 5; i++) { const a = Math.random() * 6.283; this.glow.emit(ev.x + Math.cos(a) * ev.r * 0.9, rand(0.6, 1.6), -ev.d + Math.sin(a) * ev.r * 0.9, -Math.sin(a) * 9, 0.5, Math.cos(a) * 9, 1.9, 0.35, 0.5, 0.36, 0.2, 0, 2, 0); }
         break;
       }
-      case 'boonTaken': {
-        const p = this.magePos, c = _c.setRGB(1, 0.85, 0.4).clone();
+      case 'tracer': {
+        const pts = ev.pts.map(p => p.src ? this.tips[ev.hero || 0].clone() : new THREE.Vector3(p.x, 1.2 * (p.r / 0.6) * 0.9 + 0.2, -p.d));
+        this.bolt(pts, ELEMENT_COLOR.lead, 0.05, 0);
+        const a = pts[0];
+        this.flash(a.x, a.y, a.z, ELEMENT_COLOR.lead, 0.7, 0.1, 3);
+        break;
+      }
+      case 'heal': {
+        if (this.lod < 0.4) break;
+        const p = this.heroPos[ev.hero || 0], c = ELEMENT_COLOR.heal;
+        for (let i = 0; i < (ev.crit ? 12 : 6); i++) this.glow.emit(p.x + rand(-0.5, 0.5), rand(0.3, 1.4), p.z + rand(-0.5, 0.5), 0, rand(1.5, 3), 0, c.r * 1.6, c.g * 1.6, c.b * 1.6, rand(0.24, 0.42), rand(0.5, 0.9), 0, 0.6, 0.2);
+        break;
+      }
+      case 'rush': {
+        const c = _c.setRGB(1, 0.85, 0.3).clone();
+        this.ring(this.magePos.x, 0.12, this.magePos.z, c, 5, 0.4, 2);
+        this.burst(this.magePos.x, 1.4, this.magePos.z, c, 24, 7, 0.4, 0.5, { up: 0.8, drag: 2 });
+        break;
+      }
+      case 'raise': {
+        const p = this.heroPos[ev.hero || 0], c = _c.setRGB(1, 0.95, 0.7).clone();
+        this.flash(p.x, 1.4, p.z, c, 2.4, 0.4, 3.4);
+        for (let i = 0; i < 2; i++) this.ring(p.x, 0.12 + i * 0.03, p.z, c, 2.5 + i * 2, 0.5 + i * 0.2, 2.6);
+        this.burst(p.x, 1.2, p.z, c, 60, 6, 0.5, 1.1, { up: 1.2, drag: 1.2 });
+        this.light(p.x, 2.4, p.z, c, 700, 0.6);
+        break;
+      }
+      case 'warcry': {
+        const c = _c.setRGB(1, 0.3, 0.2).clone();
+        this.ring(ev.x, 0.13, -ev.d, c, 8, 0.45, 2.4);
+        this.ring(ev.x, 0.15, -ev.d, c, 5, 0.3, 2);
+        this.world.shake(0.4);
+        break;
+      }
+      case 'gearTaken': {
+        const p = this.heroPos[ev.hero || 0], c = _c.setRGB(1, 0.85, 0.4).clone();
         for (let i = 0; i < 3; i++) this.ring(p.x, 0.1 + i * 0.03, p.z, c, 3 + i * 2, 0.5 + i * 0.2, 2.4);
         this.burst(p.x, 1.6, p.z, c, 70, 8, 0.6, 1.1, { up: 0.7, drag: 1.5 });
         this.light(p.x, 2.5, p.z, c, 700, 0.7);
@@ -639,7 +713,8 @@ export class Vfx {
       // status dressing on orcs
       for (const e of sim.enemies) {
         const h = ORC_HEIGHT[e.type] || 1.2, z = -e.d;
-        if (e.burnT > 0 && e.bleed) { if (Math.random() < dt * 16) this.glow.emit(e.x + rand(-e.r, e.r) * 0.6, rand(0.5, h), z + rand(-e.r, e.r) * 0.6, rand(-1, 1), rand(0.5, 2), rand(-1, 1), 1.7, 0.08, 0.1, rand(0.16, 0.28), 0.5, 12, 0.5, 0.5); }
+        if (e.burnT > 0 && e.toxic) { if (Math.random() < dt * 16) this.glow.emit(e.x + rand(-e.r, e.r) * 0.6, rand(0.5, h + 0.3), z + rand(-e.r, e.r) * 0.6, rand(-0.4, 0.4), rand(0.5, 1.6), rand(-0.4, 0.4), 1.1, 1.7, 0.2, rand(0.2, 0.34), 0.5, 0, 0.5, 0.4); }
+        else if (e.burnT > 0 && e.bleed) { if (Math.random() < dt * 16) this.glow.emit(e.x + rand(-e.r, e.r) * 0.6, rand(0.5, h), z + rand(-e.r, e.r) * 0.6, rand(-1, 1), rand(0.5, 2), rand(-1, 1), 1.7, 0.08, 0.1, rand(0.16, 0.28), 0.5, 12, 0.5, 0.5); }
         else if (e.burnT > 0 && Math.random() < dt * 22) this.glow.emit(e.x + rand(-e.r, e.r) * 0.7, rand(0.3, h + 0.5), z + rand(-e.r, e.r) * 0.7, 0, rand(1.5, 3), 0, 1.9, 0.65 + Math.random() * 0.4, 0.12, rand(0.4, 0.8), 0.4, 0, 1, 0);
         if (e.chillT > 0 && e.daze) { if (Math.random() < dt * 10) { const a = this.t * 6 + e.id; this.glow.emit(e.x + Math.cos(a) * 0.5, h + 0.75, z + Math.sin(a) * 0.5, 0, 0.2, 0, 1.9, 1.6, 0.4, 0.2, 0.3, 0, 0, 0.4); } }
         else if (e.chillT > 0 && Math.random() < dt * 9) this.glow.emit(e.x + rand(-e.r, e.r), rand(0.3, h + 0.4), z + rand(-e.r, e.r), 0, -0.6, 0, 0.7, 1.4, 1.7, 0.24, 0.6, 0, 0, 0.3);
@@ -792,7 +867,7 @@ export class Vfx {
 
     // hero attachments: barrier, wisps, weapon embers, sprint dust
     const heroes = ctx.heroes || [];
-    for (let hi = 0; hi < 2; hi++) {
+    for (let hi = 0; hi < 4; hi++) {
       const mg = heroes[hi], sh = this.shields[hi], hp = this.heroPos[hi];
       if (mg) hp.copy(mg.pos);
       const target = mg && mg.shieldFrac > 0 ? 0.05 + mg.shieldFrac * 0.1 : 0;

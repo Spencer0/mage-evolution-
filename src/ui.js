@@ -1,6 +1,6 @@
 // DOM layer: HUD, grimoire, results tally, shop and overlays.
 import {
-  RUNES, CLASSES, CLASS_ORDER, CATEGORIES, upgradeCost, evolutionTier, totalLevels,
+  RUNES, CLASSES, CLASS_ORDER, upgradeCost, evolutionTier, totalLevels, talentPoints, canLearn, findTalent,
   fmt, BIOMES, CHAMPIONS, CAVE_LENGTH, biomeAt, REACTIONS,
 } from './data.js';
 
@@ -24,6 +24,11 @@ const ICONS = {
   wisp: '<circle cx="14" cy="10" r="4.500"/><path d="M10.500 13.500C8 16 6 17 3 18c3 2 7 1.500 10-1.500"/>',
   corpse: '<path d="M12 2.500l2 5.500 5.500-2-2 5.500 4 3-5 1.500 1 5.500-4.500-3.500-4.500 3.500 1-5.500-5-1.500 4-3-2-5.500 5.500 2z"/>',
   meteor: '<circle cx="9" cy="15" r="5"/><path d="M13 11l7-7M16 13.500l5-5M10.500 8.500l5-5"/>',
+  fork: '<path d="M12 21v-9M12 12 6 4M12 12l6-8M6 4v4.500M6 4h4.500M18 4v4.500M18 4h-4.500"/>',
+  sweep: '<path d="M4 19A15 15 0 0 1 20 5M20 5h-5.500M20 5v5.500"/><path d="M4 12a8 8 0 0 1 8-8"/>',
+  thorns: '<path d="M12 3l7.500 3v5.500c0 4.600-3.200 8-7.500 9.500-4.300-1.500-7.500-4.900-7.500-9.500V6z"/><path d="M12 8v7M8.500 11.500h7"/>',
+  horn: '<path d="M3 13c6 .5 11-2.500 16-9v15c-4-3-9-4.500-16-3zM3 13v3M7.500 16.500l1 4"/>',
+  boot: '<path d="M8 3v9l-3.500 3v4.500h15V16l-6.500-3V3z"/><path d="M4.500 17h15"/>',
 };
 const CAT_COLOR = { might: '#ff9a5a', survival: '#7be3a0', fortune: '#f4c452', arcana: '#c58bff' };
 
@@ -31,7 +36,7 @@ export function glyphSvg(id, sw = 0.2) {
   const pts = RUNES[id].glyph.map(p => `${p[0].toFixed(3)},${p[1].toFixed(3)}`).join(' ');
   return `<svg viewBox="-1.25 -1.25 2.5 2.5" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="${pts}"/></svg>`;
 }
-const icon = u => u.icon === 'rune' ? glyphSvg(u.rune) : SVG_OPEN + ICONS[u.icon] + '</svg>';
+const icon = u => u.icon === 'rune' ? glyphSvg(u.rune) : SVG_OPEN + (ICONS[u.icon] || ICONS.might) + '</svg>';
 const timeStr = s => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export class UI {
@@ -53,6 +58,7 @@ export class UI {
     $('btn-classes-back').addEventListener('click', () => g.toShop(true));
     $('btn-party-go').addEventListener('click', () => g.toDraw());
     $('btn-ff').addEventListener('click', () => g.cycleFF());
+    $('btn-repeat').addEventListener('click', () => g.repeatLast());
     $('btn-mute').addEventListener('click', () => g.toggleMute());
     $('btn-menu').addEventListener('click', () => this.openMenu());
     $('btn-menu-close').addEventListener('click', () => { $('menu').hidden = true; g.sfx.click(); });
@@ -79,14 +85,18 @@ export class UI {
   }
 
   // ------------------------------------------------------------ rune drawing
-  setupDraw({ index, count, chosen, unlocked, canShop, first, cls, party }) {
+  setupDraw({ index, count, chosen, unlocked, canShop, first, cls, party, repeat }) {
     const C = CLASSES[cls], word = C.word, who = party > 1 ? C.name + ': ' : '';
-    $('draw-heading').textContent = count > 1 ? `${who}${word} ${index + 1} of ${count}` : party > 1 ? `${who}draw your ${word}` : `Draw your ${word}`;
+    $('draw-heading').textContent = count > 1 ? `${who}${word} ${index + 1} of ${count}` : party > 1 ? `${who}${word}` : `Draw your ${word}`;
     $('draw-sub').textContent = first ? `Trace ${RUNES[C.starter].shape} in one stroke.`
       : count > 1 && index > 0 ? 'Mix them to set off reactions.'
       : 'Clean lines hit harder. Quick strokes strike faster.';
     $('grimoire-label').firstChild.textContent = C.book + ' ';
     $('btn-to-shop').style.visibility = canShop ? 'visible' : 'hidden';
+    // one tap to reuse what this hero drew last run
+    const rb = $('btn-repeat');
+    rb.hidden = !(repeat && index === 0);
+    if (repeat) rb.innerHTML = `Same as last run <span>${repeat.map(r => `<i style="color:${RUNES[r.rune].color}">${glyphSvg(r.rune, 0.3)}</i><b>${r.grade}</b>`).join('')}</span>`;
     if (index === 0) { const rr = $('rune-result'); rr.className = 'rune-result'; rr.textContent = ''; }   // no stale banner from last run
     const pips = $('draw-pips');
     pips.textContent = '';
@@ -170,6 +180,7 @@ export class UI {
     // one health bar per hero in the party
     const bars = $('hero-bars');
     bars.textContent = '';
+    bars.classList.toggle('grid', heroes.length > 2);
     this.heroEls = heroes.map(cls => {
       const C = CLASSES[cls], el = document.createElement('div');
       el.className = 'hbar ' + (heroes.length > 1 ? 'party' : 'solo');
@@ -265,7 +276,7 @@ export class UI {
     panel.classList.toggle('win', sum.victory);
     $('res-eyebrow').textContent = `Run ${save.runs}`;
     $('res-title').textContent = sum.victory ? 'The Warlord falls' : sum.depth < 30 ? 'You perished' : sum.depth < 400 ? 'Overrun' : 'So very close';
-    $('res-meta').textContent = `${Math.floor(sum.depth)} m deep · ${timeStr(sum.time)}` + (sum.boons.length ? ` · ${sum.boons.length} boon${sum.boons.length > 1 ? 's' : ''}` : '');
+    $('res-meta').textContent = `${Math.floor(sum.depth)} m deep · ${timeStr(sum.time)}` + (sum.gear.length ? ` · ${sum.gear.length} gear found` : '');
     const rows = [
       [`Orcs slain <small>×${sum.kills}</small>`, sum.killGold, false],
       [`Depth bonus <small>${Math.floor(sum.depth)} m</small>`, sum.depthBonus, false],
@@ -325,14 +336,16 @@ export class UI {
   // ------------------------------------------------------------ shop
   buildShop(save) {
     const cls = save.cur, C = CLASSES[cls];
-    // class tabs appear once there is more than one hero to spend on
+    // a tab per hero in the party, badged with unspent talent points
     const tabs = $('class-tabs');
     tabs.textContent = '';
     const owned = CLASS_ORDER.filter(id => save.cls[id].unlocked);
     tabs.hidden = owned.length < 2;
     for (const id of owned) {
       const b = document.createElement('button');
-      b.type = 'button'; b.className = 'tab' + (id === cls ? ' on' : ''); b.textContent = CLASSES[id].name;
+      const free = talentPoints(save, id).free;
+      b.type = 'button'; b.className = 'tab' + (id === cls ? ' on' : '');
+      b.innerHTML = CLASSES[id].name + (free ? `<em>${free}</em>` : '');
       b.addEventListener('click', () => this.game.switchClass(id));
       tabs.appendChild(b);
     }
@@ -340,53 +353,141 @@ export class UI {
     scroll.textContent = '';
     scroll.scrollTop = 0;
     this.cards = {};
-    for (const cat of CATEGORIES) {
-      const h = document.createElement('h3');
-      h.className = 'shop-cat'; h.textContent = typeof cat.name === 'string' ? cat.name : cat.name[cls];
-      scroll.appendChild(h);
-      const grid = document.createElement('div');
-      grid.className = 'shop-grid';
-      for (const u of C.upgrades.filter(x => x.cat === cat.id)) {
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = 'upg'; b.id = 'upg-' + u.id;
-        b.style.setProperty('--ic', u.rune ? RUNES[u.rune].color : CAT_COLOR[u.cat]);
-        b.innerHTML = `<span class="upg-icon">${icon(u)}</span>
-          <span class="upg-body"><span class="upg-name"><span>${u.name}</span><small></small></span><span class="upg-desc">${u.desc}</span><span class="upg-val"></span></span>
-          <span class="upg-cost"></span>`;
-        b.addEventListener('click', () => this.game.buy(u.id));
-        grid.appendChild(b);
-        this.cards[u.id] = { el: b, lvl: b.querySelector('small'), val: b.querySelector('.upg-val'), cost: b.querySelector('.upg-cost') };
-      }
-      scroll.appendChild(grid);
+    // ---- the two things to buy
+    const row = document.createElement('div');
+    row.className = 'upg-row';
+    for (const u of C.upgrades) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'upg'; b.id = 'upg-' + u.id;
+      b.style.setProperty('--ic', u.id === 'power' ? '#ff9a5a' : '#7be3a0');
+      b.innerHTML = `<span class="upg-icon">${icon(u)}</span>
+        <span class="upg-body"><span class="upg-name"><span>${u.name}</span><small></small></span><span class="upg-desc">${u.desc}</span><span class="upg-val"></span></span>
+        <span class="upg-cost"></span>`;
+      b.addEventListener('click', () => this.game.buy(u.id));
+      row.appendChild(b);
+      this.cards[u.id] = { el: b, lvl: b.querySelector('small'), val: b.querySelector('.upg-val'), cost: b.querySelector('.upg-cost') };
     }
+    scroll.appendChild(row);
+    // ---- the talent tree
+    const head = document.createElement('div');
+    head.className = 'tal-head';
+    head.innerHTML = '<h3 class="shop-cat">Talents</h3><p id="tal-points"></p>';
+    scroll.appendChild(head);
+    const tree = document.createElement('div');
+    tree.className = 'tree';
+    this.nodes = {};
+    for (const br of C.branches) {
+      const col = document.createElement('div');
+      col.className = 'branch';
+      col.innerHTML = `<h4>${br.name}</h4>`;
+      for (const t of br.talents) {
+        const n = document.createElement('button');
+        n.type = 'button'; n.className = 'tnode'; n.id = 'tal-' + t.id;
+        if (t.rune) n.style.setProperty('--rc', RUNES[t.rune].color);
+        n.innerHTML = `<span>${icon(t)}</span><b>${t.name}</b>`;
+        n.addEventListener('click', () => this.selectTalent(t.id, true));
+        col.appendChild(n);
+        this.nodes[t.id] = n;
+      }
+      tree.appendChild(col);
+    }
+    // the description sits above the tree and sticks there while the tree scrolls under it
+    const info = document.createElement('div');
+    info.className = 'tal-info'; info.id = 'tal-info';
+    info.innerHTML = '<div><b id="tal-name"></b><p id="tal-desc"></p></div><button id="btn-learn" class="btn btn-gold" type="button">Learn</button>';
+    scroll.appendChild(info);
+    scroll.appendChild(tree);
+    info.querySelector('#btn-learn').addEventListener('click', () => { if (this.selTalent) this.game.learnTalent(this.selTalent); });
+    const reset = document.createElement('button');
+    reset.type = 'button'; reset.className = 'btn btn-ghost btn-small tal-reset'; reset.id = 'btn-tal-reset';
+    reset.textContent = 'Reset talents';
+    reset.addEventListener('click', () => this.game.resetTalents());
+    scroll.appendChild(reset);
+    this.selTalent = null;
+    // start on the first talent that can be learned, so the tree explains itself
+    const first = C.talents.find(t => canLearn(save, cls, t.id)) || C.talents.find(t => !save.cls[cls].talents.includes(t.id)) || C.talents[0];
+    this.selTalent = first.id;
+    this.refreshShop(save);
+  }
+  selectTalent(id, tapped) {
+    const save = this.game.save, cls = save.cur;
+    // tapping the talent that is already selected learns it
+    if (tapped && this.selTalent === id && canLearn(save, cls, id)) { this.game.learnTalent(id); return; }
+    if (tapped) this.game.sfx.click();
+    this.selTalent = id;
     this.refreshShop(save);
   }
   refreshShop(save) {
-    const cls = save.cur, C = CLASSES[cls], up = save.cls[cls].upgrades;
+    const cls = save.cur, C = CLASSES[cls], mine = save.cls[cls], up = mine.upgrades;
     $('shop-gold').textContent = fmt(save.gold);
     for (const u of C.upgrades) {
       const c = this.cards[u.id];
       if (!c) continue;
       const l = up[u.id] || 0, maxed = l >= u.max, cost = maxed ? 0 : upgradeCost(u, l);
-      c.lvl.textContent = u.max > 1 ? `${l} / ${u.max}` : '';
-      c.val.innerHTML = maxed ? u.value(l) : u.max === 1 ? '' : `${u.value(l)} <i>\u2192 ${u.value(l + 1)}</i>`;
-      c.cost.innerHTML = maxed ? (u.max === 1 ? 'Owned' : 'Max') : `<i class="coin"></i>${fmt(cost)}`;
+      c.lvl.textContent = `Lv ${l}`;
+      c.val.innerHTML = maxed ? u.value(l) : `${u.value(l)} <i>→ ${u.value(l + 1)}</i>`;
+      c.cost.innerHTML = maxed ? 'Max' : `<i class="coin"></i>${fmt(cost)}`;
       c.el.classList.toggle('maxed', maxed);
       c.el.classList.toggle('afford', !maxed && save.gold >= cost);
     }
-    const E = C.evolutions, tier = evolutionTier(save), n = totalLevels(save), evo = E[tier], next = E[tier + 1];
+    // talents
+    const tp = talentPoints(save, cls), levels = totalLevels(save, cls);
+    const pts = $('tal-points');
+    if (pts) {
+      pts.innerHTML = (tp.free ? `<b>${tp.free} point${tp.free > 1 ? 's' : ''} to spend</b>` : 'No points to spend')
+        + (tp.next ? ` · next in ${tp.next - levels} upgrade${tp.next - levels === 1 ? '' : 's'}` : '');
+      pts.classList.toggle('has', tp.free > 0);
+    }
+    for (const t of C.talents) {
+      const n = this.nodes && this.nodes[t.id];
+      if (!n) continue;
+      const got = mine.talents.includes(t.id), open = canLearn(save, cls, t.id), reach = !got && (!t.req || mine.talents.includes(t.req));
+      n.className = 'tnode' + (got ? ' got' : open ? ' open' : reach ? ' reach' : ' locked') + (this.selTalent === t.id ? ' sel' : '') + (t.row ? ' linked' : '');
+    }
+    const sel = this.selTalent && findTalent(cls, this.selTalent);
+    if (sel && $('tal-name')) {
+      const got = mine.talents.includes(sel.id), open = canLearn(save, cls, sel.id);
+      $('tal-name').textContent = sel.name;
+      $('tal-desc').textContent = sel.desc;
+      const b = $('btn-learn');
+      b.disabled = !open;
+      b.textContent = got ? 'Learned' : open ? 'Learn' : sel.req && !mine.talents.includes(sel.req) ? 'Locked' : 'No points';
+      b.classList.toggle('btn-gold', open);
+      b.classList.toggle('btn-ghost', !open);
+    }
+    const rs = $('btn-tal-reset');
+    if (rs) rs.hidden = mine.talents.length === 0;
+    // unspent-point badges on the hero tabs
+    const owned = CLASS_ORDER.filter(id => save.cls[id].unlocked);
+    [...$('class-tabs').children].forEach((b, i) => {
+      const free = owned[i] ? talentPoints(save, owned[i]).free : 0;
+      b.innerHTML = CLASSES[owned[i]].name + (free ? `<em>${free}</em>` : '');
+    });
+    const E = C.evolutions, tier = evolutionTier(save), evo = E[tier], next = E[tier + 1];
     $('evo-step').textContent = `${tier + 1} / ${E.length}`;
     $('evo-name').textContent = evo.name;
     $('evo-blurb').textContent = evo.blurb;
     if (next) {
-      $('evo-fill').style.width = ((n - evo.at) / (next.at - evo.at) * 100) + '%';
-      const left = next.at - n;
+      $('evo-fill').style.width = ((levels - evo.at) / (next.at - evo.at) * 100) + '%';
+      const left = next.at - levels;
       $('evo-next').textContent = `${left} more upgrade${left === 1 ? '' : 's'} to become ${/^[AEIOU]/.test(next.name) ? 'an' : 'a'} ${next.name}`;
     } else { $('evo-fill').style.width = '100%'; $('evo-next').textContent = 'Final form reached.'; }
     $('btn-go').firstChild.textContent = save.runs === 0 ? `Draw a ${C.word} ` : 'Back to the cave ';
   }
+  /** A fresh talent point: nudge the player toward the tree. */
+  pointFx() {
+    const el = $('tal-points');
+    if (!el) return;
+    el.classList.remove('pop'); void el.offsetWidth; el.classList.add('pop');
+    const open = document.querySelector('.tnode.open');
+    if (open && this.game.world.portrait) open.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+  learnedFx(id) {
+    const n = this.nodes && this.nodes[id];
+    if (n) { n.classList.remove('pop'); void n.offsetWidth; n.classList.add('pop'); }
+  }
 
-  // ------------------------------------------------------------ class screen
+  // ------------------------------------------------------------ party screen
   showClasses(save) {
     const wrap = $('class-cards');
     wrap.textContent = '';
@@ -400,8 +501,7 @@ export class UI {
       b.style.setProperty('--rc', RUNES[C.starter].color);
       const can = save.gold >= C.cost;
       b.innerHTML = `<span class="cc-glyph">${glyphSvg(C.starter, 0.16)}</span>
-        <span class="cc-body"><b>${C.name}</b><i>${mine.unlocked ? C.evolutions[tier].name : 'Not recruited'}</i><span>${C.blurb}</span>
-        <small>${mine.unlocked ? (mine.runs ? `${mine.runs} run${mine.runs === 1 ? '' : 's'} \u00b7 deepest ${Math.floor(mine.bestDepth)} m` : 'Just joined') : 'Joins the party with their own talents and shop.'}</small></span>
+        <span class="cc-body"><b>${C.name}</b><i>${mine.unlocked ? C.evolutions[tier].name : 'Not recruited'}</i><span>${C.blurb}</span></span>
         <span class="cc-go${mine.unlocked ? ' in' : can ? ' buy' : ' poor'}">${mine.unlocked ? 'Joined' : `<i class="coin"></i>${fmt(C.cost)}`}</span>`;
       if (!mine.unlocked) b.addEventListener('click', () => this.game.recruit(id));
       wrap.appendChild(b);
@@ -410,25 +510,28 @@ export class UI {
   }
   classDenied(id) { const el = $('class-' + id); if (el) { el.classList.remove('nope'); void el.offsetWidth; el.classList.add('nope'); } }
 
-  // ------------------------------------------------------------ boons
-  showBoons(offer) {
+  // ------------------------------------------------------------ gear
+  showGear(offer) {
     const wrap = $('boon-cards');
     wrap.textContent = '';
-    offer.forEach((b, i) => {
-      const el = document.createElement('button');
+    offer.forEach((g, i) => {
+      const C = CLASSES[g.cls], el = document.createElement('button');
       el.type = 'button'; el.className = 'bcard';
-      el.innerHTML = `<span class="upg-icon">${SVG_OPEN + ICONS[b.icon] + '</svg>'}</span><b>${b.name}</b><span>${b.desc}</span>`;
-      el.addEventListener('click', () => this.game.pickBoon(i));
+      el.style.setProperty('--gc', '#' + g.color.toString(16).padStart(6, '0'));
+      el.style.setProperty('--rc', RUNES[C.starter].color);
+      el.innerHTML = `<span class="upg-icon">${SVG_OPEN + (ICONS[g.icon] || ICONS.might) + '</svg>'}</span><b>${g.name}</b><i>${C.name} · ${g.slot}</i><span>${g.desc}</span>`;
+      el.addEventListener('click', () => this.game.pickGear(i));
       wrap.appendChild(el);
     });
     $('boon').hidden = false;
   }
-  hideBoons() { $('boon').hidden = true; }
-  addBoon(b) {
+  hideGear() { $('boon').hidden = true; }
+  addGear(g) {
     const el = document.createElement('span');
     el.className = 'boon-chip';
-    el.innerHTML = SVG_OPEN + ICONS[b.icon] + '</svg>';
-    el.title = b.name;
+    el.style.setProperty('--rc', RUNES[CLASSES[g.cls].starter].color);
+    el.innerHTML = SVG_OPEN + (ICONS[g.icon] || ICONS.might) + '</svg>';
+    el.title = `${g.name} (${CLASSES[g.cls].name})`;
     $('boons').appendChild(el);
   }
   boughtFx(id, ok) {

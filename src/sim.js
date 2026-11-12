@@ -1,7 +1,7 @@
 // Headless run simulation. No rendering, no DOM: the renderer reads state and
 // drains `events`; tools/balance.mjs drives the very same code to tune numbers.
 import {
-  RUNES, ENEMIES, CHAMPIONS, CAVE_LENGTH, MAGE_SPEED, SPAWN_AHEAD, CAST_RANGE, ELEMENTS, BOONS, newMods,
+  RUNES, ENEMIES, CHAMPIONS, CAVE_LENGTH, MAGE_SPEED, SPAWN_AHEAD, CAST_RANGE, ELEMENTS, GEAR, newMods,
   depthHp, depthDmg, depthGold, packBudget,
 } from './data.js';
 
@@ -61,10 +61,13 @@ function generatePacks(rng, lootChance) {
   return packs;
 }
 
+const FORMATION = {
+  warrior: { ox: -0.7, od: 1.6 }, mage: { ox: 0.9, od: -0.9 }, gnome: { ox: -1.5, od: -1.7 }, nurse: { ox: 0.1, od: -2.7 },
+};
 /** Where a hero stands relative to the party anchor: fighters up front, casters behind. */
 export function formation(cls, solo) {
   if (solo) return { ox: 0, od: 0 };
-  return cls === 'warrior' ? { ox: -0.75, od: 1.5 } : { ox: 0.85, od: -1.3 };
+  return FORMATION[cls] || { ox: 0, od: 0 };
 }
 
 export class RunSim {
@@ -90,6 +93,8 @@ export class RunSim {
         x: 0, d: 0, hp: st.maxHp, maxHp: st.maxHp,
         maxShield: st.maxHp * st.shield, shield: st.maxHp * st.shield, shieldDelay: 0,
         alive: true, invuln: 0, revives: st.phoenix, castT: 0, hurtT: 0,
+        mod: newMods(), gear: [],          // what this hero has picked up this run
+        rushT: 0, rushAmt: 0, rushDmg: 1, cryCd: 4, trampleT: 0, angel: st.angel, raises: 0,
         wispCd: [], meteorCd: st.meteor ? 3 + idx : Infinity, slots: [],
       };
       for (let i = 0; i < st.wisps; i++) hero.wispCd.push(0.6 + i * 0.4);
@@ -108,9 +113,8 @@ export class RunSim {
     this.packIdx = 0;
     this.gold = 0;
     this.kills = 0;
-    this.mod = newMods();        // run-only boons from slain champions (shared by the party)
-    this.boons = [];
-    this.offer = null;           // [boon, boon] while the run waits for a choice
+    this.gear = [];              // ids of the gear picked up this run
+    this.offer = null;           // [gear, gear] while the run waits for a choice
     this.over = false;
     this.victory = false;
     this.boss = null;
@@ -178,11 +182,13 @@ export class RunSim {
   /** Which hero an orc is after. Heavies and most melee go for the front line. */
   targetOf(e) {
     const lead = this.lead;
+    if (e.tauntT > 0 && e.tauntBy && e.tauntBy.alive) return e.tauntBy;
     if (this.heroes.length === 1 || e.def.heavy) return lead;
     const frontChance = e.def.range ? 0.45 : 0.72;
     if (e.pick < frontChance) return lead;
-    for (const h of this.heroes) if (h.alive && h !== lead) return h;
-    return lead;
+    // the rest pick one of the heroes hanging back
+    const back = this.heroes.filter(h => h.alive && h !== lead);
+    return back.length ? back[Math.floor(e.pick * 97) % back.length] : lead;
   }
   inRange(e, range = CAST_RANGE, from = this.party) {
     return e.alive && e.d - from.d < range && e.d - from.d > -9;
@@ -220,40 +226,53 @@ export class RunSim {
     return best;
   }
 
-  // ------------------------------------------------------------ boons
-  /** Take one of the two boons on offer and resume the run. */
-  chooseBoon(i) {
+  // ------------------------------------------------------------ gear
+  /** Take one of the two pieces on offer; its owner wears it for the rest of the run. */
+  chooseGear(i) {
     if (!this.offer) return null;
-    const b = this.offer[i] || this.offer[0], m = this.mod;
+    const g = this.offer[i] || this.offer[0];
     this.offer = null;
-    this.boons.push(b.id);
-    for (const k in b.mod) {
-      if (k === 'echo' || k === 'crit' || k === 'leech') m[k] += b.mod[k]; else m[k] *= b.mod[k];
+    const h = this.heroes.find(x => x.cls === g.cls) || this.lead, m = h.mod;
+    this.gear.push(g.id);
+    h.gear.push(g);
+    for (const k in g.mod) {
+      if (k === 'echo' || k === 'crit' || k === 'leech') m[k] += g.mod[k]; else m[k] *= g.mod[k];
     }
-    if (b.mod.hp) for (const h of this.heroes) {
-      if (!h.alive) continue;
-      h.maxHp *= b.mod.hp; h.maxShield *= b.mod.hp; h.hp = h.maxHp; h.shield = h.maxShield;
-    }
-    this.emit({ type: 'boonTaken', boon: b });
-    return b;
+    if (g.mod.hp) { h.maxHp *= g.mod.hp; h.maxShield *= g.mod.hp; h.hp = h.maxHp; h.shield = h.maxShield; }
+    this.emit({ type: 'gearTaken', gear: g, hero: h.idx });
+    return g;
   }
-  offerBoons() {
-    const pool = BOONS.filter(b => !this.boons.includes(b.id));
-    if (pool.length < 2 || !this.anyAlive()) return;
+  offerGear() {
+    // only for heroes still standing, and only into a free slot (three charms fit)
+    const pool = GEAR.filter(g => {
+      const h = this.heroes.find(x => x.cls === g.cls);
+      if (!h || !h.alive || h.gear.includes(g)) return false;
+      const worn = h.gear.filter(x => x.slot === g.slot).length;
+      return worn < (g.slot === 'charm' ? 3 : 1);
+    });
+    if (pool.length < 2) return;
     const a = pool.splice((this.rng() * pool.length) | 0, 1)[0];
-    const b = pool[(this.rng() * pool.length) | 0];
-    this.offer = [a, b];
-    this.emit({ type: 'boonOffer', offer: this.offer });
+    // prefer a second piece that is a real alternative: another slot or another hero
+    const elsewhere = pool.filter(g => g.cls !== a.cls), otherSlot = pool.filter(g => g.slot !== a.slot);
+    const src = elsewhere.length ? elsewhere : otherSlot.length ? otherSlot : pool;
+    this.offer = [a, src[(this.rng() * src.length) | 0]];
+    this.emit({ type: 'gearOffer', offer: this.offer });
   }
 
   // ------------------------------------------------------------ casting
-  hasteMult(hero) { return hero.stats.haste * this.mod.haste; }
+  hasteMult(hero) { return hero.stats.haste * hero.mod.haste * (hero.rushT > 0 ? 1 + hero.rushAmt : 1); }
 
   cast(slot, echo) {
     const m = slot.hero, def = slot.def, s = m.stats;
     if (!m.alive) return false;
-    const range = def.range || CAST_RANGE;
-    const target = def.id === 'void' || def.id === 'crown' ? this.clusterTarget(m, def.radius, range) : this.pickTarget(m, range);
+    const range = def.range || CAST_RANGE, fork = s.fork;
+    if (def.support) return this.castSupport(slot, echo);
+    let target = def.id === 'void' || def.id === 'crown' || def.id === 'bomb' || def.id === 'orbital' ? this.clusterTarget(m, def.radius, range) : this.pickTarget(m, range);
+    if (def.id === 'longshot') {
+      // the sniper goes for the biggest thing in sight
+      let hp = -1;
+      for (const e of this.enemies) if (this.inRange(e, range, m) && e.hp > hp && !e.fleeing) { hp = e.hp; target = e; }
+    }
     if (!target) return false;
     const dmg = def.dmg * s.dmgMult * slot.power;
     const ox = m.x + 0.55, od = m.d + 0.7;
@@ -264,23 +283,27 @@ export class RunSim {
       case 'ember':
         this.projectiles.push({
           id: NEXT_ID++, kind: 'fireball', by: m, x: ox, d: od, target, tx: target.x, td: target.d,
-          speed: 46, dmg, radius: def.radius, life: 2,
+          speed: 46, dmg, radius: def.radius, life: 2, fork: fork ? 1 : 0,
         });
         break;
       case 'frost': {
         const dx = target.x - ox, dd = target.d - od, l = Math.hypot(dx, dd) || 1;
-        this.projectiles.push({
-          id: NEXT_ID++, kind: 'lance', by: m, x: ox, d: od, vx: (dx / l) * 58, vd: (dd / l) * 58,
-          dmg, pierce: def.pierce, hit: new Set(), life: 0.52,
-        });
+        for (const a of fork ? [0, -0.24, 0.24] : [0]) {
+          const c = Math.cos(a), sn = Math.sin(a), vx = (dx * c - dd * sn) / l, vd = (dx * sn + dd * c) / l;
+          this.projectiles.push({
+            id: NEXT_ID++, kind: 'lance', by: m, x: ox, d: od, vx: vx * 58, vd: vd * 58,
+            dmg: a ? dmg * 0.7 : dmg, pierce: def.pierce, hit: new Set(), life: 0.52,
+          });
+        }
         break;
       }
       case 'arcane': {
         const used = new Set();
-        for (let i = 0; i < def.missiles; i++) {
+        const count = def.missiles + (fork ? 2 : 0);
+        for (let i = 0; i < count; i++) {
           const t = this.nearestEnemy(m.x, m.d + 2, CAST_RANGE + 2, used) || target;
           used.add(t.id);
-          const side = i - (def.missiles - 1) / 2;
+          const side = i - (count - 1) / 2;
           this.projectiles.push({
             id: NEXT_ID++, kind: 'missile', by: m, x: ox, d: od, vx: side * 11, vd: 12 + this.rng() * 4,
             target: t, dmg, speed: 36, life: 2, delay: i * 0.04,
@@ -292,7 +315,7 @@ export class RunSim {
         const hit = new Set();
         const pts = [{ x: ox, d: od, src: true }];
         let cur = target, power = dmg;
-        for (let i = 0; i <= def.chains && cur; i++) {
+        for (let i = 0; i <= def.chains + (fork ? 3 : 0) && cur; i++) {
           hit.add(cur.id);
           pts.push({ x: cur.x, d: cur.d, r: cur.r, id: cur.id });
           const from = cur;
@@ -307,22 +330,23 @@ export class RunSim {
       case 'void':
         this.zones.push({
           id: NEXT_ID++, kind: 'void', by: m, x: target.x, d: target.d, r: def.radius,
-          t: 0, dur: def.duration, tick: 0, dmg,
+          t: 0, dur: def.duration, tick: 0, dmg, fork: fork ? 1 : 0,
         });
         this.emit({ type: 'zone', z: this.zones[this.zones.length - 1] });
         break;
       // ---- warrior
       case 'cleave': {
         const ang = Math.atan2(target.x - m.x, target.d - m.d);
-        this.emit({ type: 'slash', x: m.x, d: m.d, ang, r: def.reach, arc: def.arc });
+        const reach = def.reach * (fork ? 1.25 : 1), arc = fork ? Math.PI : def.arc;
+        this.emit({ type: 'slash', x: m.x, d: m.d, ang, r: reach, arc });
         for (const e of this.enemies) {
           if (!e.alive) continue;
           const dx = e.x - m.x, dd = e.d - m.d, dist = Math.hypot(dx, dd);
-          if (dist > def.reach + e.r) continue;
+          if (dist > reach + e.r) continue;
           let da = Math.atan2(dx, dd) - ang;
           while (da > Math.PI) da -= Math.PI * 2;
           while (da < -Math.PI) da += Math.PI * 2;
-          if (Math.abs(da) > def.arc && dist > 1.4) continue;
+          if (Math.abs(da) > arc && dist > 1.4) continue;
           if (!e.def.heavy) { e.kx += (dx / (dist + 0.1)) * 3; e.kd += (dd / (dist + 0.1)) * 3; }
           this.damage(e, dmg, 'steel', by);
         }
@@ -330,23 +354,29 @@ export class RunSim {
       }
       case 'hurl': {
         const dx = target.x - ox, dd = target.d - od, l = Math.hypot(dx, dd) || 1;
-        this.projectiles.push({
-          id: NEXT_ID++, kind: 'haxe', by: m, x: ox, d: od, vx: (dx / l) * 40, vd: (dd / l) * 40,
-          dmg, pierce: def.pierce, hit: new Set(), life: 0.6, element: 'iron',
-        });
-        break;
-      }
-      case 'quake':
-        this.explode(m.x, m.d, def.radius, dmg, 'earth', 'quake', { knock: 4, by: m });
-        for (const e of this.enemies) {
-          if (e.alive && !e.def.elite && Math.hypot(e.x - m.x, e.d - m.d) < def.radius + e.r) e.stunT = Math.max(e.stunT, 0.55);
+        for (const a of fork ? [0, -0.26, 0.26] : [0]) {
+          const c = Math.cos(a), sn = Math.sin(a), vx = (dx * c - dd * sn) / l, vd = (dx * sn + dd * c) / l;
+          this.projectiles.push({
+            id: NEXT_ID++, kind: 'haxe', by: m, x: ox, d: od, vx: vx * 40, vd: vd * 40,
+            dmg: a ? dmg * 0.7 : dmg, pierce: def.pierce, hit: new Set(), life: 0.6, element: 'iron',
+          });
         }
         break;
+      }
+      case 'quake': {
+        const rad = def.radius * (fork ? 1.3 : 1);
+        this.explode(m.x, m.d, rad, dmg, 'earth', 'quake', { knock: 4, by: m });
+        for (const e of this.enemies) {
+          if (e.alive && !e.def.elite && Math.hypot(e.x - m.x, e.d - m.d) < rad + e.r) e.stunT = Math.max(e.stunT, fork ? 0.9 : 0.55);
+        }
+        break;
+      }
       case 'whirl': {
         let hits = 0;
-        this.emit({ type: 'whirl', x: m.x, d: m.d, r: def.radius });
+        const rad = def.radius * (fork ? 1.3 : 1);
+        this.emit({ type: 'whirl', x: m.x, d: m.d, r: rad });
         for (const e of this.enemies) {
-          if (!e.alive || Math.hypot(e.x - m.x, e.d - m.d) > def.radius + e.r) continue;
+          if (!e.alive || Math.hypot(e.x - m.x, e.d - m.d) > rad + e.r) continue;
           this.damage(e, dmg, 'blood', by);
           hits++;
         }
@@ -357,11 +387,122 @@ export class RunSim {
         const x = target.x, d = Math.max(m.d + 2, target.d - (target.moving && !target.engaged ? 3 : 0));
         this.emit({ type: 'meteor', x, d, delay: 0.38, r: def.radius, spirit: true });
         this.pending.push({ t: 0.38, fn: () => this.explode(x, d, def.radius, dmg, 'spirit', 'judge', { knock: 5, by: m }) });
+        if (fork) {       // a second blade for the next pack along
+          const t2 = this.nearestEnemy(x, d + 7, 9);
+          if (t2) {
+            const x2 = t2.x, d2 = t2.d;
+            this.pending.push({ t: 0.3, fn: () => this.emit({ type: 'meteor', x: x2, d: d2, delay: 0.38, r: def.radius, spirit: true }) });
+            this.pending.push({ t: 0.68, fn: () => this.explode(x2, d2, def.radius, dmg * 0.7, 'spirit', 'judge', { knock: 5, by: m }) });
+          }
+        }
+        break;
+      }
+      // ---- gnome
+      case 'longshot': {
+        const pts = [{ x: ox, d: od, src: true }];
+        const hit = new Set();
+        let cur = target, power = dmg;
+        for (let i = 0; i <= (fork ? 2 : 0) && cur; i++) {
+          hit.add(cur.id);
+          pts.push({ x: cur.x, d: cur.d, r: cur.r, id: cur.id });
+          const from = cur;
+          this.damage(cur, power, 'lead', by);
+          power *= 0.6;
+          cur = this.nearestEnemy(from.x, from.d, 9, hit);
+        }
+        this.emit({ type: 'tracer', pts, hero: m.idx });
+        break;
+      }
+      case 'drone':
+        for (let i = 0; i < (fork ? 2 : 1); i++) {
+          this.projectiles.push({
+            id: NEXT_ID++, kind: 'bullet', by: m, x: ox + (i ? -0.5 : 0.3), d: od + 0.4, vx: (i ? -6 : 6), vd: 30,
+            target, dmg, speed: 60, life: 1.2, element: 'tech',
+          });
+        }
+        break;
+      case 'bomb':
+        this.projectiles.push({
+          id: NEXT_ID++, kind: 'bomb', by: m, x: ox, d: od, target, tx: target.x, td: target.d,
+          speed: 30, dmg, radius: def.radius, life: 2, lock: true, cluster: fork ? 3 : 0,
+        });
+        break;
+      case 'orbital': {
+        // the beam starts on the pack and walks away from the party
+        const dx = target.x - m.x, dd = target.d - m.d, l = Math.hypot(dx, dd) || 1;
+        const n = def.blasts + (fork ? 2 : 0);
+        for (let i = 0; i < n; i++) {
+          const x = target.x + (dx / l) * i * 3.6, d = target.d + (dd / l) * i * 3.6;
+          this.pending.push({ t: 0.12 + i * 0.13, fn: () => this.explode(x, d, def.radius, dmg, 'spirit', 'laser', { by: m }) });
+        }
+        this.emit({ type: 'orbital', x: target.x, d: target.d, dx: dx / l, dd: dd / l, n });
+        break;
+      }
+      // ---- nurse
+      case 'toxin': {
+        const used = new Set();
+        for (let i = 0; i < (fork ? 3 : 1); i++) {
+          const t = i ? this.nearestEnemy(m.x, m.d + 2, range, used) || target : target;
+          used.add(t.id);
+          this.projectiles.push({
+            id: NEXT_ID++, kind: 'dart', by: m, x: ox, d: od, vx: (i - 1) * 8 * (fork ? 1 : 0), vd: 26,
+            target: t, dmg, speed: 52, life: 1.4, element: 'toxin', delay: i * 0.03,
+          });
+        }
+        break;
+      }
+      case 'defib': {
+        const lead = this.lead;
+        this.explode(lead.x, lead.d, def.radius, dmg, 'storm', 'defib', { by: m });
+        for (const e of this.enemies) {
+          if (e.alive && !e.def.elite && Math.hypot(e.x - lead.x, e.d - lead.d) < def.radius + e.r) e.stunT = Math.max(e.stunT, 0.8);
+        }
+        for (const h of this.heroes) if (h.alive) this.heal(h, h.maxHp * def.heal * slot.power * s.healMult, m);
+        // and one of the fallen gets back up (two with Triage)
+        const fallen = this.heroes.find(h => !h.alive);
+        if (fallen && m.raises < (fork ? 2 : 1)) { m.raises++; this.raise(fallen, 0.5); }
         break;
       }
     }
-    if (!echo && this.rng() < s.echo + this.mod.echo) this.pending.push({ t: 0.16, fn: () => this.cast(slot, true) });
+    if (!echo && this.rng() < s.echo + m.mod.echo) this.pending.push({ t: 0.16, fn: () => this.cast(slot, true) });
     return true;
+  }
+
+  /** Runes that help the party instead of hurting orcs. */
+  castSupport(slot, echo) {
+    const m = slot.hero, def = slot.def, s = m.stats;
+    const power = s.dmgMult > 0 ? slot.power : 1;
+    if (def.id === 'mend') {
+      // whoever is worst off (two patients with Triage); nothing to do if everyone is whole
+      const hurt = this.heroes.filter(h => h.alive && h.hp < h.maxHp * 0.995).sort((a, b) => a.hp / a.maxHp - b.hp / b.maxHp);
+      if (!hurt.length) return false;
+      for (const h of hurt.slice(0, s.fork ? 2 : 1)) this.heal(h, h.maxHp * def.heal * power * s.healMult, m);
+    } else if (def.id === 'adrenaline') {
+      if (!this.enemies.length) return false;
+      for (const h of this.heroes) {
+        if (!h.alive) continue;
+        h.rushT = def.rushTime; h.rushAmt = def.rush * power; h.rushDmg = s.fork ? 1.25 : 1;
+      }
+      this.emit({ type: 'rush', hero: m.idx });
+    }
+    m.castT = 0.28;
+    this.emit({ type: 'cast', rune: def.id, slot: slot.idx, hero: m.idx, x: m.x, d: m.d, echo: !!echo });
+    if (!echo && this.rng() < s.echo + m.mod.echo) this.pending.push({ t: 0.2, fn: () => this.castSupport(slot, true) });
+    return true;
+  }
+  heal(h, amount, by) {
+    if (!h.alive || amount <= 0) return;
+    const crit = by && by.stats.critChance + by.mod.crit > 0 && this.rng() < by.stats.critChance + by.mod.crit;
+    const amt = amount * (by ? by.mod.dmg : 1) * (crit ? 2 : 1);
+    h.hp = Math.min(h.maxHp, h.hp + amt);
+    this.emit({ type: 'heal', hero: h.idx, amount: amt, crit });
+  }
+  /** Bring a fallen hero back at the party's side. */
+  raise(h, frac) {
+    h.alive = true; h.hp = h.maxHp * frac; h.shield = h.maxShield; h.invuln = 1.6;
+    h.x = this.party.x + h.ox; h.d = this.party.d + h.od;
+    this.party.alive = true;
+    this.emit({ type: 'raise', hero: h.idx });
   }
 
   // ------------------------------------------------------------ damage
@@ -369,10 +510,16 @@ export class RunSim {
   damage(e, amount, element, opts = {}) {
     if (!e.alive || amount <= 0) return;
     const by = opts.by || this.heroes[0], s = by.stats;
-    const E = ELEMENTS[element] || ELEMENTS.phys, mod = this.mod;
-    let dmg = amount * mod.dmg * (e.def.heavy ? mod.heavy : 1), crit = false;
+    const E = ELEMENTS[element] || ELEMENTS.phys, mod = by.mod;
+    let dmg = amount * mod.dmg * (e.def.heavy ? mod.heavy : 1) * (by.rushT > 0 ? by.rushDmg : 1), crit = false;
     const critChance = s.critChance + mod.crit;
-    if (!opts.noCrit && critChance > 0 && this.rng() < critChance) { dmg *= s.critMult; crit = true; }
+    if (!opts.noCrit && critChance > 0 && this.rng() < critChance) {
+      dmg *= s.critMult; crit = true;
+      if (s.critBurst) {
+        const x = e.x, d = e.d, blast = amount * 0.8;
+        this.pending.push({ t: 0.04, fn: () => this.explode(x, d, 2.8, blast, 'phys', 'crit', { noCrit: true, noReact: true, noStatus: true, by }) });
+      }
+    }
     const has = st => (st === 'chill' ? e.chillT : st === 'burn' ? e.burnT : e.shockT) > 0;
     const clear = st => { if (st === 'chill') e.chillT = 0; else if (st === 'burn') e.burnT = 0; else e.shockT = 0; };
     const R = E.react;
@@ -392,7 +539,7 @@ export class RunSim {
     }
     if (e.shockT > 0) dmg *= 1.2;
     if (!opts.noStatus) {
-      if (E.applies === 'burn') { e.burnT = 3; e.burnDps = Math.max(e.burnDps, amount * 0.28); e.bleed = !!E.bleed; e.burnBy = by; }
+      if (E.applies === 'burn') { e.burnT = E.toxic ? 4 : 3; e.burnDps = Math.max(e.burnDps, amount * (E.toxic ? 0.6 : 0.28)); e.bleed = !!E.bleed; e.toxic = !!E.toxic; e.burnBy = by; }
       else if (E.applies === 'chill') { e.chillT = 3; e.daze = !!E.daze; }
       else if (E.applies === 'shock') e.shockT = 2.5;
       else if (E.applies === 'mark') e.mark = true;
@@ -424,13 +571,13 @@ export class RunSim {
     e.alive = false;
     const s = by.stats;
     this.kills++;
-    const gold = e.gold * s.goldMult * this.mod.gold * (e.def.heavy ? s.trophy : 1) * (e.mark ? 1.6 : 1);
+    const gold = e.gold * s.goldMult * by.mod.gold * (e.mark ? 1.6 : 1);
     this.gold += gold;
-    const leech = s.leech + this.mod.leech;
+    const leech = s.leech + by.mod.leech;
     const healed = by.alive ? by : this.lead;
     if (leech > 0 && healed.alive) healed.hp = Math.min(healed.maxHp, healed.hp + healed.maxHp * leech);
     this.emit({ type: 'kill', e, gold, element, x: e.x, d: e.d, marked: e.mark });
-    if (e.type === 'champion') this.pending.push({ t: 0.7, fn: () => this.offerBoons() });
+    if (e.type === 'champion') this.pending.push({ t: 0.7, fn: () => this.offerGear() });
     if (s.corpse > 0 && !e.def.elite) {
       const x = e.x, d = e.d, blast = e.maxHp * s.corpse;
       this.pending.push({ t: 0.12, fn: () => this.explode(x, d, 3.2, blast, 'phys', 'corpse', { noCrit: true, noReact: true, noStatus: true, by }) });
@@ -449,7 +596,9 @@ export class RunSim {
 
   hurt(m, amount, src) {
     if (!m || !m.alive || m.invuln > 0 || this.over) return;
-    let amt = amount * m.stats.armor * this.mod.armor;
+    let amt = amount * m.stats.armor * m.mod.armor;
+    // spiked armour bites back at whoever swung
+    if (m.stats.thorns && src && src.def && src.alive) this.damage(src, 3.2 * m.stats.dmgMult, 'phys', { by: m, noCrit: true, noReact: true, noStatus: true });
     m.shieldDelay = 3;
     m.hurtT = 0.16;
     let absorbed = 0;
@@ -470,6 +619,9 @@ export class RunSim {
         this.explode(m.x, m.d, 9, 32 * m.stats.dmgMult, 'fire', 'nova', { knock: 9, by: m });
       } else {
         m.hp = 0; m.alive = false;
+        // a guardian angel in the party pulls the first to fall straight back
+        const angel = this.heroes.find(h => h.alive && h.angel > 0);
+        if (angel) { angel.angel--; this.raise(m, 0.5); return; }
         this.party.alive = this.anyAlive();
         this.emit({ type: 'heroDead', hero: m.idx, last: !this.party.alive });
         if (!this.party.alive) { this.over = true; this.emit({ type: 'mageDead' }); }
@@ -486,7 +638,7 @@ export class RunSim {
     this.spawnPacks();
 
     // --- heroes: timers, barrier
-    let dragStat = 0, alive = 0;
+    let dragStat = 0, alive = 0, regen = 0, speedMod = 1, dragMod = 1;
     for (const m of this.heroes) {
       if (!m.alive) continue;
       alive++; dragStat += m.stats.drag;
@@ -497,8 +649,13 @@ export class RunSim {
         m.shieldDelay -= dt;
         if (m.shieldDelay <= 0 && m.shield < m.maxShield) m.shield = Math.min(m.maxShield, m.shield + m.maxShield * 0.5 * dt);
       }
+      if (m.rushT > 0) m.rushT -= dt;
+      regen += m.stats.regen;
+      speedMod = Math.max(speedMod, m.mod.speed);
+      dragMod = Math.min(dragMod, m.mod.drag);
     }
     dragStat /= Math.max(1, alive);
+    if (regen > 0) for (const m of this.heroes) if (m.alive && m.hp < m.maxHp) m.hp = Math.min(m.maxHp, m.hp + m.maxHp * regen * dt);
     // The party never stops for fodder: every goblin hanging on just drags the
     // sprint down a little. Only heavies (brutes, champions, the boss) are walls.
     let drag = 0, wall = this.bossDead;
@@ -510,7 +667,7 @@ export class RunSim {
         if (fd > -0.6 && fd < e.r + 1.6 && Math.abs(e.x - lead.x) < e.r + 1.5) wall = true;
       } else if (e.engaged) drag++;
     }
-    const want = wall ? 0 : Math.max(0.42, 1 - 0.1 * drag * this.mod.drag * dragStat) * this.mod.speed;
+    const want = wall ? 0 : Math.max(0.42, 1 - 0.1 * drag * dragMod * dragStat) * speedMod;
     P.speedFrac += (want - P.speedFrac) * Math.min(1, dt * (want < P.speedFrac ? 12 : 5));
     P.blocked = P.speedFrac < 0.12;
     P.d = Math.min(CAVE_LENGTH - 4, P.d + MAGE_SPEED * P.speedFrac * dt);
@@ -542,6 +699,28 @@ export class RunSim {
                 target: t, dmg: 2.6 * s.dmgMult, speed: 44, life: 2,
               });
             } else m.wispCd[i] = 0;
+          }
+        }
+        if (s.warcry) {
+          m.cryCd -= dt;
+          if (m.cryCd <= 0) {
+            let any = false;
+            for (const e of this.enemies) {
+              if (!e.alive || Math.hypot(e.x - m.x, e.d - m.d) > 8) continue;
+              any = true;
+              if (!e.def.elite) e.stunT = Math.max(e.stunT, 1);
+              e.tauntT = 4; e.tauntBy = m;
+            }
+            if (any) { m.cryCd = 6; this.emit({ type: 'warcry', x: m.x, d: m.d, hero: m.idx }); } else m.cryCd = 0.3;
+          }
+        }
+        if (s.trample && P.speedFrac > 0.3) {
+          m.trampleT -= dt;
+          if (m.trampleT <= 0) {
+            m.trampleT = 0.3;
+            for (const e of this.enemies) {
+              if (e.alive && !e.def.heavy && Math.hypot(e.x - m.x, e.d - m.d) < 2.3) this.damage(e, 2.4 * s.dmgMult, 'phys', { by: m, noCrit: true, noReact: true, noStatus: true });
+            }
           }
         }
         m.meteorCd -= dt;
@@ -596,7 +775,9 @@ export class RunSim {
       const m = this.targetOf(e);          // the hero this orc is after
       e.tgt = m.idx;
       const pace = MAGE_SPEED * P.speedFrac;
-      const slow = e.chillT > 0 ? (e.def.elite ? 0.8 : 0.6) : 1;
+      if (e.tauntT > 0) e.tauntT -= dt;
+      let slow = e.chillT > 0 ? (e.def.elite ? 0.8 : 0.6) : 1;
+      for (const h of this.heroes) if (h.alive && h.stats.slowAura && Math.hypot(h.x - e.x, h.d - e.d) < 7.5) { slow *= e.def.elite ? 0.85 : 0.7; e.warped = true; break; }
       const dx = m.x - e.x, dd = m.d - e.d, dist = Math.hypot(dx, dd);
       let speed = e.speed * slow * (e.buffed ? 1.25 : 1) * (e.enraged ? 1.3 : 1);
       // fodder that has caught the party clings on at its pace (unless chilled)
@@ -740,13 +921,23 @@ export class RunSim {
       }
       const by = { by: p.by };
       switch (p.kind) {
+        case 'bomb':
         case 'fireball': {
-          if (p.target && p.target.alive) { p.tx = p.target.x; p.td = p.target.d; }
+          if (!p.lock && p.target && p.target.alive) { p.tx = p.target.x; p.td = p.target.d; }
           const dx = p.tx - p.x, dd = p.td - p.d, dist = Math.hypot(dx, dd), stepLen = p.speed * dt;
           if (dist <= stepLen + 0.4 || p.life <= 0) {
             p.dead = true; p.x = p.tx; p.d = p.td;
             this.emit({ type: 'projEnd', p, hit: true });
-            this.explode(p.x, p.d, p.radius, p.dmg, 'fire', 'fire', { primary: p.target, falloff: 0.65, knock: 2.2, by: p.by });
+            this.explode(p.x, p.d, p.radius, p.dmg, 'fire', p.kind === 'bomb' ? 'bomb' : 'fire', { primary: p.target, falloff: 0.65, knock: 2.2, by: p.by });
+            if (p.fork) {      // the fireball jumps to the next orc
+              const skip = new Set(p.target ? [p.target.id] : []);
+              const t2 = this.nearestEnemy(p.x, p.d, 10, skip);
+              if (t2) this.projectiles.push({ id: NEXT_ID++, kind: 'fireball', by: p.by, x: p.x, d: p.d, target: t2, tx: t2.x, td: t2.d, speed: 40, dmg: p.dmg * 0.7, radius: p.radius * 0.85, life: 1.5, fork: 0, jump: true });
+            }
+            for (let i = 0; i < (p.cluster || 0); i++) {      // bomblets scatter round the blast
+              const a = this.rng() * 6.283, r = 3 + this.rng() * 2.5, x = p.x + Math.cos(a) * r, d = p.d + Math.sin(a) * r, by = p.by, dm = p.dmg * 0.5;
+              this.pending.push({ t: 0.18 + i * 0.09, fn: () => this.explode(x, d, 2.4, dm, 'fire', 'bomb', { by }) });
+            }
           } else { p.x += (dx / dist) * stepLen; p.d += (dd / dist) * stepLen; }
           break;
         }
@@ -766,6 +957,8 @@ export class RunSim {
           if (p.dead) this.emit({ type: 'projEnd', p, hit: p.hit.size > 0 });
           break;
         }
+        case 'bullet':
+        case 'dart':
         case 'missile':
         case 'wisp': {
           if (!p.target || !p.target.alive) p.target = this.nearestEnemy(p.x, p.d, 16);
@@ -783,7 +976,7 @@ export class RunSim {
           if (dist < t.r + 0.55 || p.life <= 0) {
             p.dead = true;
             this.emit({ type: 'projEnd', p, hit: true });
-            if (dist < t.r + 1.5) this.damage(t, p.dmg, p.kind === 'wisp' ? 'wisp' : 'arcane', by);
+            if (dist < t.r + 1.5) this.damage(t, p.dmg, p.element || (p.kind === 'wisp' ? 'wisp' : 'arcane'), by);
           }
           break;
         }
@@ -812,6 +1005,13 @@ export class RunSim {
       if (end) {
         z.dead = true;
         this.explode(z.x, z.d, z.r * 0.8, z.dmg * 3.5, 'void', 'void', { by: z.by });
+        if (z.fork) {      // a smaller singularity opens on the next pack
+          const t2 = this.nearestEnemy(z.x, z.d + z.r * 1.6, 12);
+          if (t2) {
+            const nz = { id: NEXT_ID++, kind: 'void', by: z.by, x: t2.x, d: t2.d, r: z.r * 0.75, t: 0, dur: z.dur * 0.7, tick: 0, dmg: z.dmg * 0.6, fork: 0 };
+            this.pending.push({ t: 0.01, fn: () => { this.zones.push(nz); this.emit({ type: 'zone', z: nz }); } });
+          }
+        }
       }
     }
     if (this.zones.length) this.zones = this.zones.filter(z => !z.dead);
@@ -846,7 +1046,7 @@ export class RunSim {
     const recordBonus = record ? Math.floor((killGold + depthBonus) * 0.2) : 0;
     const victoryBonus = this.victory ? Math.floor((killGold + depthBonus) * 0.5) : 0;
     return {
-      depth, time: this.t, kills: this.kills, boons: this.boons.slice(), victory: this.victory,
+      depth, time: this.t, kills: this.kills, gear: this.gear.slice(), victory: this.victory,
       killGold, depthBonus, record, recordBonus, victoryBonus,
       total: killGold + depthBonus + recordBonus + victoryBonus,
     };

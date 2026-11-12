@@ -1,15 +1,15 @@
 // Mage Evolution: game flow. title -> [party] -> draw rune(s) -> run -> results -> shop -> ...
 import * as THREE from 'three';
 import { World } from './world.js';
-import { Mage, Warrior, OrcPool } from './actors.js';
+import { Mage, Warrior, Gnome, Nurse, OrcPool, applyGear, clearGear, updateGear } from './actors.js';
 import { Vfx, ELEMENT_COLOR, ORC_HEIGHT } from './vfx.js';
 import { Sfx } from './audio.js';
 import { UI } from './ui.js';
 import { RuneInput } from './runeInput.js';
 import { RunSim, formation } from './sim.js';
 import {
-  RUNES, CLASSES, CLASS_ORDER, CLASS_SCREEN_AFTER_RUNS, findUpgrade, upgradeCost, computeStats, newSave, migrateSave,
-  runePower, runeGrade, runeTempo, evolutionTier, biomeAt, fmt, ENEMIES,
+  RUNES, CLASSES, CLASS_ORDER, CLASS_SCREEN_AFTER_RUNS, findUpgrade, findTalent, canLearn, upgradeCost, computeStats, newSave, migrateSave,
+  runePower, runeGrade, runeTempo, evolutionTier, totalLevels, TALENT_AT, biomeAt, fmt, ENEMIES,
 } from './data.js';
 import { damp } from './geo.js';
 
@@ -36,7 +36,7 @@ class Game {
     const scene = this.world.scene;
 
     // one model per class; everyone recruited stands (and runs) together
-    this.models = { mage: new Mage(), warrior: new Warrior() };
+    this.models = { mage: new Mage(), warrior: new Warrior(), gnome: new Gnome(), nurse: new Nurse() };
     this.elementBy = {};
     for (const id in this.models) {
       const h = this.models[id];
@@ -135,7 +135,7 @@ class Game {
     else if (this.state === 'draw') { s.x = 0; s.y = (this.rune.cy - this.rune.h / 2) / this.rune.h + 0.02; }
     else if (this.state === 'title') { s.x = 0; s.y = 0.06; }
     else if (this.state === 'classes') { s.x = 0; s.y = w.portrait ? -0.2 : -0.14; }
-    else { s.x = 0; s.y = 0; }
+    else { s.x = 0; s.y = w.portrait && this.runParty.length > 1 ? -0.09 : 0; }      // lift the party clear of the health bars
   }
   setState(s) { this.state = s; this.applyViewShift(); }
 
@@ -181,15 +181,59 @@ class Game {
     this.persist();
     this.ui.buildShop(this.save);
   }
-  pickBoon(i) {
+  /** Champion spoils: the chosen piece goes onto its hero, where it can be seen. */
+  pickGear(i) {
     if (!this.sim || !this.sim.offer) return;
-    const b = this.sim.chooseBoon(i);
-    this.ui.hideBoons();
-    this.ui.addBoon(b);
-    this.ui.banner(b.name, b.desc, '#ffe9a6');
+    const g = this.sim.chooseGear(i);
+    const hero = this.sim.heroes.find(h => h.cls === g.cls);
+    this.ui.hideGear();
+    this.ui.addGear(g);
+    if (hero) applyGear(this.models[g.cls], hero.gear);
+    this.ui.banner(g.name, `${CLASSES[g.cls].name}: ${g.desc}`, '#' + g.color.toString(16).padStart(6, '0'));
     this.sfx.revive();
     this.world.flash(0xffe0a0, 0.5);
     for (const ev of this.sim.drainEvents()) this.onEvent(ev);
+  }
+  learnTalent(id) {
+    const save = this.save, cls = save.cur;
+    if (!canLearn(save, cls, id)) { this.sfx.deny(); return; }
+    save.cls[cls].talents.push(id);
+    this.persist();
+    this.sfx.evolve();
+    const p = this.mage.root.position, t = findTalent(cls, id);
+    const c = t.rune ? ELEMENT_COLOR[RUNES[t.rune].element] || ELEMENT_COLOR.phys : ELEMENT_COLOR.phys;
+    this.vfx.burst(p.x, 1.5, p.z, c, 50, 7, 0.55, 1.0, { up: 0.7, drag: 1.5 });
+    this.vfx.ring(p.x, 0.1, p.z, c, 3.5, 0.5, 2.4);
+    this.ui.refreshShop(save);
+    this.ui.learnedFx(id);
+  }
+  resetTalents() {
+    const mine = this.mine;
+    if (!mine.talents.length) return;
+    mine.talents = [];
+    mine.lastDraw = [];
+    this.persist();
+    this.sfx.click();
+    this.ui.refreshShop(this.save);
+  }
+  /** Draw screen shortcut: this hero uses the same runes, at the same grades, as last run. */
+  repeatLast() {
+    if (this.state !== 'draw' || this.rune.busy) return;
+    const q = this.queue[this.qi], cls = q.cls, last = this.lastDrawFor(cls);
+    if (!last || q.i !== 0) return;
+    this.sfx.runeResult(last[0].grade);
+    this.chosenBy[cls] = last.map(r => ({ ...r }));
+    const R = RUNES[last[0].rune];
+    this.models[cls].setElement(R.color); this.elementBy[cls] = R.element;
+    this.world.flash(R.hex, 0.35);
+    while (this.qi < this.queue.length && this.queue[this.qi].cls === cls) this.qi++;
+    if (this.qi < this.queue.length) this.nextRune(); else this.launch();
+  }
+  /** Last run's runes for a hero, if they still fit what the hero knows today. */
+  lastDrawFor(cls) {
+    const st = this.statsBy[cls], last = this.save.cls[cls].lastDraw || [];
+    if (last.length !== st.slots || !last.every(r => st.runes.includes(r.rune))) return null;
+    return last;
   }
 
   /** Every hero in the party draws their own runes, one after the other. */
@@ -214,7 +258,7 @@ class Game {
     const q = this.queue[this.qi], cls = q.cls, C = CLASSES[cls], st = this.statsBy[cls];
     const first = this.save.cls[cls].runs === 0;
     this.focusCls = cls;
-    this.ui.setupDraw({ index: q.i, count: st.slots, chosen: this.chosenBy[cls], unlocked: st.runes, canShop: this.save.runs > 0, first, cls, party: this.party().length });
+    this.ui.setupDraw({ index: q.i, count: st.slots, chosen: this.chosenBy[cls], unlocked: st.runes, canShop: this.save.runs > 0, first, cls, party: this.party().length, repeat: q.i === 0 ? this.lastDrawFor(cls) : null });
     this.layoutDraw();
     this.rune.begin(st.runes, (res, dur) => this.onStroke(res, dur), C.runes);
     if (first && q.i === 0) { this.rune.showGuide(C.starter); this.ui.selectRuneCard(C.starter); }
@@ -243,7 +287,7 @@ class Game {
       return;
     }
     const R = RUNES[res.rune], model = this.models[cls];
-    const power = runePower(res.quality, st.mastery);
+    const power = runePower(res.quality);
     const haste = runeTempo(dur, R.complexity);
     const grade = runeGrade(res.quality);
     this.chosenBy[cls].push({ rune: res.rune, power, haste, grade, quality: res.quality });
@@ -272,7 +316,11 @@ class Game {
   }
   startRun() {
     const party = this.runParty = this.party(), save = this.save;
-    for (const cls of party) save.cls[cls].lastRunes = this.chosenBy[cls].map(c => c.rune);
+    for (const cls of party) {
+      save.cls[cls].lastRunes = this.chosenBy[cls].map(c => c.rune);
+      save.cls[cls].lastDraw = this.chosenBy[cls].map(c => ({ rune: c.rune, power: c.power, haste: c.haste, grade: c.grade, quality: c.quality }));
+      clearGear(this.models[cls]);
+    }
     this.sim = new RunSim({
       heroes: party.map(cls => ({ cls, stats: this.statsBy[cls], slots: this.chosenBy[cls] })),
       seed: (Math.random() * 1e9) | 0,
@@ -320,7 +368,7 @@ class Game {
       const c = save.cls[cls];
       c.runs++; c.bestDepth = Math.max(c.bestDepth, sum.depth);
     }
-    this.ui.hideBoons();
+    this.ui.hideGear();
     if (sum.victory) { save.victories++; save.bestTime = save.bestTime ? Math.min(save.bestTime, sum.time) : sum.time; }
     this.persist();
     this.sfx.setBeat(false);
@@ -339,6 +387,7 @@ class Game {
       this.orcs.clear();
       this.vfx.reset();
       this.timeScale = this.timeTarget = 1;
+      for (const id in this.models) clearGear(this.models[id]);     // gear is lost with the run
       this.placeIdle();
       this.focusCls = this.save.cur;
       this.setState('shop');
@@ -361,6 +410,7 @@ class Game {
     this.sfx.buy(lvl);
     this.ui.refreshShop(save);
     this.ui.boughtFx(id, true);
+    if (TALENT_AT.includes(totalLevels(save))) { this.sfx.tally(); this.ui.pointFx(); }
     const p = this.mage.root.position;
     this.vfx.burst(p.x, 1.4, p.z, ELEMENT_COLOR.phys, 16, 4, 0.4, 0.6, { up: 0.8, drag: 2 });
     const tier = evolutionTier(save);
@@ -410,7 +460,9 @@ class Game {
         if (ev.e.type === 'loot') { ui.toast('Loot hauler! Drop it before it runs.'); sfx.lootSpotted(); }
         break;
       case 'cast': sfx.cast(ev.rune); if (!fast) ui.slotFired(ev.slot); break;
-      case 'boonOffer': this.slow(0.15, 0.3); ui.showBoons(ev.offer); sfx.tally(); break;
+      case 'gearOffer': this.slow(0.15, 0.3); ui.showGear(ev.offer); sfx.tally(); break;
+      case 'warcry': sfx.roar(); break;
+      case 'raise': { const cls = this.runParty[ev.hero]; ui.banner(`The ${CLASSES[cls].name} is back up`, '', '#ffe9a6'); sfx.revive(); break; }
       case 'explode': sfx.explode(ev.kind); break;
       case 'meteor': sfx.meteorFall(); break;
       case 'hit': {
@@ -460,7 +512,7 @@ class Game {
       case 'shieldBreak': sfx.shieldBreak(); break;
       case 'revive': {
         const cls = this.runParty[ev.hero];
-        sfx.revive(); ui.banner(findUpgrade(cls, 'phoenix').name, `The ${CLASSES[cls].name.toLowerCase()} rises again`, '#ffb24a'); this.slow(0.3, 0.6);
+        sfx.revive(); ui.banner((findTalent(cls, 'phoenix') || { name: 'Revived' }).name, `The ${CLASSES[cls].name.toLowerCase()} rises again`, '#ffb24a'); this.slow(0.3, 0.6);
         break;
       }
       case 'heroDead': {
@@ -576,6 +628,7 @@ class Game {
           tier: model.tier, speed: h.alive ? this.sprint : 0,
         });
         model.getStaffTip(this.vfx.tips[h.idx]);
+        updateGear(model, this.t);
       }
       this.focus.set(P.x, 0, -P.d);
       this.vfx.magePos.set(lead.x, 0, -lead.d);
